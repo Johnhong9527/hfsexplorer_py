@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hfsexplorer"
+version = "1.0.0"
+description = "HFS/HFS+/HFSX 文件系统浏览器 - 支持读写和 FileVault 2 加密"
+readme = "README.md"
+license = {text = "GPL-3.0-or-later"}
+requires-python = ">=3.9"
+authors = [
+    {name = "HFSExplorer Team", email = "dev@hfsexplorer.org"}
+]
+keywords = ["hfs", "hfs+", "hfsx", "filesystem", "macos", "filevault"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Filesystems",
+]
+dependencies = [
+    "PyQt6>=6.4.0",
+    "pycryptodome>=3.15.0",
+    "colorama>=0.4.6",
+    "tqdm>=4.65.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/hfsexplorer/hfsexplorer"
+Documentation = "https://hfsexplorer.readthedocs.io"
+Repository = "https://github.com/hfsexplorer/hfsexplorer"
+Issues = "https://github.com/hfsexplorer/hfsexplorer/issues"
+
+[project.scripts]
+hfsexplorer = "src.gui.main_window:main"
+unhfs = "src.cli.unhfs:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+
+[tool.isort]
+profile = "black"
+known_first_party = ["src"]

@@ -1,0 +1,19 @@
+# 开发依赖
+
+-r requirements.txt
+
+# 开发工具
+pre-commit>=3.0
+commitizen>=3.0
+
+# 调试工具
+ipdb>=0.13
+pdbpp>=0.10
+
+# 性能分析
+memory-profiler>=0.60
+line-profiler>=4.0
+
+# 文档
+mkdocs>=1.4
+mkdocs-material>=9.0
