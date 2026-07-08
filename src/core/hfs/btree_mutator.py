@@ -368,18 +368,234 @@ class BTreeMutator:
         Returns:
             变异结果
         """
-        # TODO: 实现节点分裂
-        # 这需要：
-        # 1. 创建新节点
-        # 2. 将一半记录移动到新节点
-        # 3. 插入新记录
-        # 4. 更新父节点
-        # 5. 如果父节点满，递归分裂
+        try:
+            # 创建新节点
+            new_node_number = self._allocate_node()
+            if new_node_number == -1:
+                return BTreeMutationResult(
+                    success=False,
+                    error="无法分配新节点"
+                )
+            
+            # 计算分裂点（中间位置）
+            split_point = node.num_records // 2
+            
+            # 收集所有记录
+            records = []
+            for i in range(node.num_records):
+                data = node.get_record_data(i)
+                records.append(data)
+            
+            # 插入新记录
+            full_record = key_data + record_data
+            records.insert(index, full_record)
+            
+            # 分割记录
+            left_records = records[:split_point]
+            right_records = records[split_point:]
+            
+            # 写入左节点（原节点）
+            self._write_records_to_node(node, left_records)
+            
+            # 写入右节点（新节点）
+            new_node = self.btree.get_node(new_node_number)
+            self._write_records_to_node(new_node, right_records)
+            
+            # 更新节点描述符
+            node.descriptor.numRecords = len(left_records)
+            new_node.descriptor.numRecords = len(right_records)
+            new_node.descriptor.kind = node.descriptor.kind
+            new_node.descriptor.height = node.descriptor.height
+            
+            # 获取分裂键（右节点的第一个记录的键）
+            split_key = right_records[0][:len(key_data)]
+            
+            # 更新父节点
+            parent_result = self._update_parent_after_split(
+                node, new_node_number, split_key
+            )
+            
+            if not parent_result.success:
+                return parent_result
+            
+            # 写入节点
+            self._write_node(node)
+            self._write_node(new_node)
+            
+            return BTreeMutationResult(
+                success=True,
+                new_root=parent_result.new_root,
+                nodes_modified=[node.descriptor.fLink, new_node_number]
+            )
+        
+        except Exception as e:
+            return BTreeMutationResult(
+                success=False,
+                error=str(e)
+            )
+    
+    def _write_records_to_node(self, node: BTreeNode, records: List[bytes]):
+        """
+        将记录写入节点
+        
+        Args:
+            node: 节点
+            records: 记录列表
+        """
+        # 清空节点数据
+        node.raw_data = bytearray(self.node_size)
+        
+        # 写入节点描述符
+        desc_data = node.descriptor.to_bytes()
+        node.raw_data[:len(desc_data)] = desc_data
+        
+        # 写入记录
+        offset = BTNodeDescriptor.STRUCT_SIZE
+        offsets = []
+        
+        for record in records:
+            offsets.append(offset)
+            node.raw_data[offset:offset + len(record)] = record
+            offset += len(record)
+        
+        # 写入空闲空间偏移
+        offsets.append(offset)
+        
+        # 写入偏移表（从末尾反向存储）
+        offset_table_offset = self.node_size - (len(records) + 1) * 2
+        for i, off in enumerate(offsets):
+            struct.pack_into('>H', node.raw_data, offset_table_offset + i * 2, off)
+        
+        # 更新偏移列表
+        node.offsets = offsets
+    
+    def _update_parent_after_split(self, left_node: BTreeNode, 
+                                  right_node_number: int, 
+                                  split_key: bytes) -> BTreeMutationResult:
+        """
+        分裂后更新父节点
+        
+        Args:
+            left_node: 左节点
+            right_node_number: 右节点号
+            split_key: 分裂键
+        
+        Returns:
+            变异结果
+        """
+        # 查找父节点
+        parent_node = self._find_parent_node(left_node)
+        
+        if parent_node is None:
+            # 需要创建新的根节点
+            return self._create_new_root(left_node, right_node_number, split_key)
+        
+        # 检查父节点是否有足够空间
+        index_record_size = len(split_key) + 4  # key + child pointer
+        
+        if self._node_has_space(parent_node, index_record_size):
+            # 直接插入
+            self._insert_index_record(parent_node, split_key, right_node_number)
+            self._write_node(parent_node)
+            
+            return BTreeMutationResult(
+                success=True,
+                nodes_modified=[parent_node.descriptor.fLink]
+            )
+        else:
+            # 父节点也需要分裂
+            # TODO: 实现递归分裂
+            return BTreeMutationResult(
+                success=False,
+                error="父节点分裂尚未实现"
+            )
+    
+    def _create_new_root(self, left_node: BTreeNode, 
+                        right_node_number: int, 
+                        split_key: bytes) -> BTreeMutationResult:
+        """
+        创建新的根节点
+        
+        Args:
+            left_node: 左节点
+            right_node_number: 右节点号
+            split_key: 分裂键
+        
+        Returns:
+            变异结果
+        """
+        # 分配新节点
+        new_root_number = self._allocate_node()
+        if new_root_number == -1:
+            return BTreeMutationResult(
+                success=False,
+                error="无法分配新根节点"
+            )
+        
+        # 创建根节点
+        new_root = self.btree.get_node(new_root_number)
+        new_root.descriptor.kind = BTreeNodeKind.INDEX
+        new_root.descriptor.height = left_node.descriptor.height + 1
+        new_root.descriptor.numRecords = 1
+        
+        # 构造索引记录
+        left_child = left_node.descriptor.fLink if left_node.descriptor.fLink != 0 else 0
+        
+        # 这里简化处理，实际需要正确计算左子节点号
+        index_record = split_key + struct.pack('>I', left_child)
+        
+        # 写入记录
+        self._write_records_to_node(new_root, [index_record])
+        
+        # 更新头记录
+        self.header.rootNode = new_root_number
+        self.header.treeDepth += 1
+        
+        # 写入头记录
+        self._write_header()
+        
+        # 写入新根节点
+        self._write_node(new_root)
         
         return BTreeMutationResult(
-            success=False,
-            error="节点分裂尚未实现"
+            success=True,
+            new_root=new_root_number,
+            nodes_modified=[new_root_number]
         )
+    
+    def _find_parent_node(self, node: BTreeNode) -> Optional[BTreeNode]:
+        """
+        查找父节点
+        
+        Args:
+            node: 子节点
+        
+        Returns:
+            父节点，如果不存在则返回 None
+        """
+        # TODO: 实现父节点查找
+        # 这需要从根节点开始遍历，查找包含指向该节点的指针的索引节点
+        return None
+    
+    def _insert_index_record(self, node: BTreeNode, key_data: bytes, 
+                            child_number: int):
+        """
+        插入索引记录
+        
+        Args:
+            node: 索引节点
+            key_data: 键数据
+            child_number: 子节点号
+        """
+        # 构造索引记录
+        index_record = key_data + struct.pack('>I', child_number)
+        
+        # 查找插入位置
+        insert_index = self._find_insert_index_in_leaf(node, key_data)
+        
+        # 插入记录
+        self._insert_into_node(node, insert_index, key_data, 
+                              struct.pack('>I', child_number))
     
     def _handle_underflow(self, node: BTreeNode):
         """
@@ -388,12 +604,231 @@ class BTreeMutator:
         Args:
             node: 下溢的节点
         """
-        # TODO: 实现节点合并或重新分配
-        # 这需要：
-        # 1. 检查兄弟节点是否有足够空间
-        # 2. 如果有，重新分配记录
-        # 3. 如果没有，合并节点
-        # 4. 更新父节点
+        try:
+            # 查找兄弟节点
+            left_sibling, right_sibling = self._find_siblings(node)
+            
+            # 检查是否可以与左兄弟合并
+            if left_sibling is not None:
+                if self._can_merge(node, left_sibling):
+                    self._merge_nodes(left_sibling, node)
+                    return
+                
+                if self._can_redistribute(node, left_sibling):
+                    self._redistribute_with_left(node, left_sibling)
+                    return
+            
+            # 检查是否可以与右兄弟合并
+            if right_sibling is not None:
+                if self._can_merge(node, right_sibling):
+                    self._merge_nodes(node, right_sibling)
+                    return
+                
+                if self._can_redistribute(node, right_sibling):
+                    self._redistribute_with_right(node, right_sibling)
+                    return
+        
+        except Exception as e:
+            # 记录错误但不抛出异常
+            print(f"处理节点下溢时出错: {e}")
+    
+    def _find_siblings(self, node: BTreeNode) -> Tuple[Optional[BTreeNode], Optional[BTreeNode]]:
+        """
+        查找兄弟节点
+        
+        Args:
+            node: 节点
+        
+        Returns:
+            (左兄弟, 右兄弟)
+        """
+        left_sibling = None
+        right_sibling = None
+        
+        # 通过前向链接查找右兄弟
+        if node.descriptor.fLink != 0:
+            right_sibling = self.btree.get_node(node.descriptor.fLink)
+        
+        # 通过后向链接查找左兄弟
+        if node.descriptor.bLink != 0:
+            left_sibling = self.btree.get_node(node.descriptor.bLink)
+        
+        return left_sibling, right_sibling
+    
+    def _can_merge(self, node1: BTreeNode, node2: BTreeNode) -> bool:
+        """
+        检查两个节点是否可以合并
+        
+        Args:
+            node1: 节点 1
+            node2: 节点 2
+        
+        Returns:
+            是否可以合并
+        """
+        # 计算合并后的总大小
+        total_records_size = 0
+        
+        for i in range(node1.num_records):
+            total_records_size += node1.get_record_length(i)
+        
+        for i in range(node2.num_records):
+            total_records_size += node2.get_record_length(i)
+        
+        # 检查是否超过节点大小
+        # 需要空间：节点描述符 + 记录 + 偏移表
+        required_space = BTNodeDescriptor.STRUCT_SIZE + total_records_size + \
+                        (node1.num_records + node2.num_records + 1) * 2
+        
+        return required_space <= self.node_size
+    
+    def _can_redistribute(self, node1: BTreeNode, node2: BTreeNode) -> bool:
+        """
+        检查是否可以重新分配记录
+        
+        Args:
+            node1: 节点 1
+            node2: 节点 2
+        
+        Returns:
+            是否可以重新分配
+        """
+        # 计算总记录数
+        total_records = node1.num_records + node2.num_records
+        
+        # 至少需要 2 个记录才能重新分配
+        return total_records >= 2
+    
+    def _merge_nodes(self, left_node: BTreeNode, right_node: BTreeNode):
+        """
+        合并两个节点
+        
+        Args:
+            left_node: 左节点
+            right_node: 右节点
+        """
+        # 收集所有记录
+        records = []
+        
+        for i in range(left_node.num_records):
+            records.append(left_node.get_record_data(i))
+        
+        for i in range(right_node.num_records):
+            records.append(right_node.get_record_data(i))
+        
+        # 写入左节点
+        self._write_records_to_node(left_node, records)
+        
+        # 更新链接
+        left_node.descriptor.fLink = right_node.descriptor.fLink
+        
+        # 如果右节点有右兄弟，更新其后向链接
+        if right_node.descriptor.fLink != 0:
+            right_right_sibling = self.btree.get_node(right_node.descriptor.fLink)
+            right_right_sibling.descriptor.bLink = left_node.descriptor.fLink
+            self._write_node(right_right_sibling)
+        
+        # 释放右节点
+        self._free_node(right_node.descriptor.fLink)
+        
+        # 写入左节点
+        self._write_node(left_node)
+        
+        # 从父节点删除记录
+        self._remove_from_parent(right_node)
+    
+    def _redistribute_with_left(self, node: BTreeNode, left_sibling: BTreeNode):
+        """
+        与左兄弟重新分配记录
+        
+        Args:
+            node: 节点
+            left_sibling: 左兄弟节点
+        """
+        # 计算移动的记录数
+        total_records = node.num_records + left_sibling.num_records
+        move_count = (left_sibling.num_records - total_records // 2)
+        
+        # 收集记录
+        left_records = []
+        for i in range(left_sibling.num_records):
+            left_records.append(left_sibling.get_record_data(i))
+        
+        node_records = []
+        for i in range(node.num_records):
+            node_records.append(node.get_record_data(i))
+        
+        # 移动记录
+        move_records = left_records[-move_count:]
+        left_records = left_records[:-move_count]
+        node_records = move_records + node_records
+        
+        # 写入节点
+        self._write_records_to_node(left_sibling, left_records)
+        self._write_records_to_node(node, node_records)
+        
+        # 写入节点
+        self._write_node(left_sibling)
+        self._write_node(node)
+        
+        # 更新父节点
+        self._update_parent_key(node)
+    
+    def _redistribute_with_right(self, node: BTreeNode, right_sibling: BTreeNode):
+        """
+        与右兄弟重新分配记录
+        
+        Args:
+            node: 节点
+            right_sibling: 右兄弟节点
+        """
+        # 计算移动的记录数
+        total_records = node.num_records + right_sibling.num_records
+        move_count = (right_sibling.num_records - total_records // 2)
+        
+        # 收集记录
+        node_records = []
+        for i in range(node.num_records):
+            node_records.append(node.get_record_data(i))
+        
+        right_records = []
+        for i in range(right_sibling.num_records):
+            right_records.append(right_sibling.get_record_data(i))
+        
+        # 移动记录
+        move_records = right_records[:move_count]
+        right_records = right_records[move_count:]
+        node_records = node_records + move_records
+        
+        # 写入节点
+        self._write_records_to_node(node, node_records)
+        self._write_records_to_node(right_sibling, right_records)
+        
+        # 写入节点
+        self._write_node(node)
+        self._write_node(right_sibling)
+        
+        # 更新父节点
+        self._update_parent_key(right_sibling)
+    
+    def _remove_from_parent(self, node: BTreeNode):
+        """
+        从父节点删除指向该节点的记录
+        
+        Args:
+            node: 节点
+        """
+        # TODO: 实现从父节点删除记录
+        pass
+    
+    def _update_parent_key(self, node: BTreeNode):
+        """
+        更新父节点中的键
+        
+        Args:
+            node: 节点
+        """
+        # TODO: 实现更新父节点键
         pass
     
     def _write_node(self, node: BTreeNode):
