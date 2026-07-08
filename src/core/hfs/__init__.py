@@ -105,6 +105,14 @@ from .extractor import (
     ExtractionProgress,
 )
 
+from .search import (
+    SearchMatchType,
+    SearchFilter,
+    SearchResult,
+    SearchEngine,
+    SearchDialog,
+)
+
 __all__ = [
     # 常量
     'SIGNATURE_HFS_PLUS',
@@ -177,4 +185,11 @@ __all__ = [
     'FileExtractor',
     'FolderExtractor',
     'ExtractionProgress',
+    
+    # 搜索
+    'SearchMatchType',
+    'SearchFilter',
+    'SearchResult',
+    'SearchEngine',
+    'SearchDialog',
 ]

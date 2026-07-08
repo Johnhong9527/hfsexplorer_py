@@ -34,6 +34,10 @@ from src.core.hfs import (
     HFSPlusCatalogFile,
     HFS_EPOCH_OFFSET,
     BTreeFile,
+    SearchEngine,
+    SearchMatchType,
+    SearchFilter,
+    SearchResult,
 )
 
 from src.gui.panels.info_panels import FilePropertiesPanel
@@ -146,6 +150,9 @@ class MainWindow(QMainWindow):
         self.catalog_offset: int = 0
         self.node_size: int = 4096
         
+        # 搜索引擎
+        self.search_engine: Optional[SearchEngine] = None
+        
         # 目录缓存 {parent_id: [children]}
         self.folder_cache: Dict[int, List[dict]] = {}
         
@@ -191,6 +198,13 @@ class MainWindow(QMainWindow):
         # 工具菜单
         tools_menu = menubar.addMenu("工具(&T)")
         
+        search_action = QAction("搜索(&S)...", self)
+        search_action.setShortcut("Ctrl+F")
+        search_action.triggered.connect(self._show_search_dialog)
+        tools_menu.addAction(search_action)
+        
+        tools_menu.addSeparator()
+        
         info_action = QAction("卷信息(&I)...", self)
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self._show_volume_info)
@@ -226,6 +240,13 @@ class MainWindow(QMainWindow):
         refresh_action = QAction("刷新", self)
         refresh_action.triggered.connect(self._refresh)
         toolbar.addAction(refresh_action)
+        
+        toolbar.addSeparator()
+        
+        # 搜索按钮
+        search_action = QAction("搜索", self)
+        search_action.triggered.connect(self._show_search_dialog)
+        toolbar.addAction(search_action)
         
         toolbar.addSeparator()
         
@@ -730,6 +751,119 @@ class MainWindow(QMainWindow):
             "本软件是原 HFSExplorer 的复刻版本，去除了 Java 依赖。\n"
             "原作者: Erik Larsson (Catacombae Software)"
         )
+    
+    def _show_search_dialog(self):
+        """显示搜索对话框"""
+        if self.current_catalog is None:
+            QMessageBox.information(self, "搜索", "请先打开一个 HFS+ 卷")
+            return
+        
+        # 创建简单的搜索对话框
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("搜索")
+        dialog.setMinimumSize(600, 400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 搜索输入
+        search_layout = QHBoxLayout()
+        search_edit = QLineEdit()
+        search_edit.setPlaceholderText("输入搜索关键词...")
+        
+        match_combo = QComboBox()
+        match_combo.addItems(["包含", "精确匹配", "开头匹配", "结尾匹配"])
+        
+        filter_combo = QComboBox()
+        filter_combo.addItems(["所有", "仅文件", "仅文件夹"])
+        
+        search_button = QPushButton("搜索")
+        
+        search_layout.addWidget(search_edit)
+        search_layout.addWidget(match_combo)
+        search_layout.addWidget(filter_combo)
+        search_layout.addWidget(search_button)
+        
+        layout.addLayout(search_layout)
+        
+        # 结果表格
+        result_table = QTableWidget()
+        result_table.setColumnCount(4)
+        result_table.setHorizontalHeaderLabels(["名称", "类型", "大小", "修改时间"])
+        result_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        result_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        
+        layout.addWidget(result_table)
+        
+        # 关闭按钮
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(dialog.close)
+        layout.addWidget(close_button)
+        
+        # 搜索功能
+        def do_search():
+            query = search_edit.text().strip()
+            if not query:
+                return
+            
+            # 获取匹配类型
+            match_type_map = {
+                "包含": SearchMatchType.CONTAINS,
+                "精确匹配": SearchMatchType.EXACT,
+                "开头匹配": SearchMatchType.STARTS_WITH,
+                "结尾匹配": SearchMatchType.ENDS_WITH,
+            }
+            match_type = match_type_map.get(match_combo.currentText(), SearchMatchType.CONTAINS)
+            
+            # 获取过滤器
+            filter_map = {
+                "所有": SearchFilter.ALL,
+                "仅文件": SearchFilter.FILES_ONLY,
+                "仅文件夹": SearchFilter.FOLDERS_ONLY,
+            }
+            search_filter = filter_map.get(filter_combo.currentText(), SearchFilter.ALL)
+            
+            # 执行搜索
+            if self.search_engine is None:
+                self.search_engine = SearchEngine(self.current_catalog)
+            
+            results = self.search_engine.search(
+                query, 
+                match_type=match_type,
+                search_filter=search_filter
+            )
+            
+            # 显示结果
+            result_table.setRowCount(len(results))
+            for i, result in enumerate(results):
+                # 名称
+                name_item = QTableWidgetItem(result.name)
+                result_table.setItem(i, 0, name_item)
+                
+                # 类型
+                type_item = QTableWidgetItem("文件" if result.item_type == "file" else "文件夹")
+                result_table.setItem(i, 1, type_item)
+                
+                # 大小
+                if result.item_type == "file":
+                    size_item = QTableWidgetItem(format_size(result.size))
+                else:
+                    size_item = QTableWidgetItem("-")
+                result_table.setItem(i, 2, size_item)
+                
+                # 修改时间
+                mod_item = QTableWidgetItem(hfs_date_to_string(result.mod_date))
+                result_table.setItem(i, 3, mod_item)
+        
+        search_button.clicked.connect(do_search)
+        search_edit.returnPressed.connect(do_search)
+        
+        dialog.exec()
 
 
 def main():
