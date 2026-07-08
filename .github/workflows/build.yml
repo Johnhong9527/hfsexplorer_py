@@ -12,6 +12,9 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: cmd
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
