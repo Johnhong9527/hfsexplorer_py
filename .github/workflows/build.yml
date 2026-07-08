@@ -108,10 +108,9 @@ jobs:
         if: matrix.pkg_cmd == 'apt-get'
         run: |
           python3 -m venv /opt/venv
-          source /opt/venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller pytest
+          /opt/venv/bin/pip install --upgrade pip
+          /opt/venv/bin/pip install -r requirements.txt
+          /opt/venv/bin/pip install pyinstaller pytest
 
       - name: Install Python dependencies (dnf)
         if: matrix.pkg_cmd == 'dnf'
@@ -124,16 +123,13 @@ jobs:
         if: matrix.pkg_cmd == 'pacman'
         run: |
           python -m venv /opt/venv
-          source /opt/venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller pytest
+          /opt/venv/bin/pip install --upgrade pip
+          /opt/venv/bin/pip install -r requirements.txt
+          /opt/venv/bin/pip install pyinstaller pytest
 
       - name: Run tests (apt)
         if: matrix.pkg_cmd == 'apt-get'
-        run: |
-          source /opt/venv/bin/activate
-          python -m pytest tests/ -v
+        run: /opt/venv/bin/python -m pytest tests/ -v
 
       - name: Run tests (dnf)
         if: matrix.pkg_cmd == 'dnf'
@@ -141,9 +137,7 @@ jobs:
 
       - name: Run tests (pacman)
         if: matrix.pkg_cmd == 'pacman'
-        run: |
-          source /opt/venv/bin/activate
-          python -m pytest tests/ -v
+        run: /opt/venv/bin/python -m pytest tests/ -v
 
       - name: Create resources directory
         run: mkdir -p resources
@@ -151,8 +145,7 @@ jobs:
       - name: Build executable (apt)
         if: matrix.pkg_cmd == 'apt-get'
         run: |
-          source /opt/venv/bin/activate
-          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+          /opt/venv/bin/pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
       - name: Build executable (dnf)
         if: matrix.pkg_cmd == 'dnf'
@@ -162,8 +155,7 @@ jobs:
       - name: Build executable (pacman)
         if: matrix.pkg_cmd == 'pacman'
         run: |
-          source /opt/venv/bin/activate
-          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+          /opt/venv/bin/pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
