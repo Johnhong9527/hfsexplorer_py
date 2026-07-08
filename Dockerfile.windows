@@ -1,0 +1,54 @@
+FROM ubuntu:22.04
+
+# 安装 Wine 和依赖
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y \
+    wget \
+    software-properties-common \
+    apt-transport-https \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Wine
+RUN mkdir -pm755 /etc/apt/keyrings && \
+    wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
+    wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources && \
+    apt-get update && \
+    apt-get install -y --install-recommends winehq-stable && \
+    rm -rf /var/lib/apt/lists/*
+
+# 安装 Python (Windows 版本)
+ENV WINEPREFIX=/root/.wine
+ENV WINEDEBUG=-all
+ENV PYTHON_VERSION=3.12.0
+
+RUN xvfb-run wine wineboot --init && \
+    wget -q https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-amd64.exe -O /tmp/python-installer.exe && \
+    xvfb-run wine /tmp/python-installer.exe /quiet InstallAllUsers=1 PrependPath=1 && \
+    rm /tmp/python-installer.exe
+
+# 安装 Python 依赖
+COPY requirements.txt /app/requirements.txt
+RUN xvfb-run wine python -m pip install --upgrade pip && \
+    xvfb-run wine pip install -r /app/requirements.txt && \
+    xvfb-run wine pip install pyinstaller pytest
+
+# 复制项目文件
+COPY . /app
+WORKDIR /app
+
+# 运行测试
+RUN xvfb-run wine python -m pytest tests/ -v
+
+# 构建 Windows 可执行文件
+RUN mkdir -p resources && \
+    xvfb-run wine pyinstaller --onefile --windowed --name HFSExplorer \
+    --hidden-import PyQt6.QtWidgets \
+    --hidden-import PyQt6.QtCore \
+    --hidden-import PyQt6.QtGui \
+    --hidden-import src.core.hfs \
+    --hidden-import src.gui.main_window \
+    main.py
+
+CMD ["echo", "Build complete. HFSExplorer.exe is in dist/"]
