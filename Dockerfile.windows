@@ -14,10 +14,10 @@ RUN dpkg --add-architecture i386 && \
     xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Wine (使用国内镜像)
+# 安装 Wine (使用官方源)
 RUN mkdir -pm755 /etc/apt/keyrings && \
-    wget -O /etc/apt/keyrings/winehq-archive.key https://mirrors.tuna.tsinghua.edu.cn/wine-builds/winehq.key && \
-    wget -NP /etc/apt/sources.list.d/ https://mirrors.tuna.tsinghua.edu.cn/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources && \
+    wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
+    wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources && \
     apt-get update && \
     apt-get install -y --install-recommends winehq-stable && \
     rm -rf /var/lib/apt/lists/*
