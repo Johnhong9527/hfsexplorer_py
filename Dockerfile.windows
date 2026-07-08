@@ -1,16 +1,10 @@
 FROM ubuntu:22.04
 
-# 设置代理环境变量
-ENV HTTP_PROXY=http://host.docker.internal:7890
-ENV HTTPS_PROXY=http://host.docker.internal:7890
-ENV http_proxy=http://host.docker.internal:7890
-ENV https_proxy=http://host.docker.internal:7890
-
 # 使用国内镜像源
 RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
 
-# 安装 Wine 和依赖
+# 安装基础依赖
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y \
@@ -20,19 +14,17 @@ RUN dpkg --add-architecture i386 && \
     xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Wine
+# 安装 Wine (使用代理下载)
 RUN mkdir -pm755 /etc/apt/keyrings && \
+    HTTP_PROXY=http://host.docker.internal:7890 \
+    HTTPS_PROXY=http://host.docker.internal:7890 \
     wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
+    HTTP_PROXY=http://host.docker.internal:7890 \
+    HTTPS_PROXY=http://host.docker.internal:7890 \
     wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources && \
     apt-get update && \
     apt-get install -y --install-recommends winehq-stable && \
     rm -rf /var/lib/apt/lists/*
-
-# 清除代理设置（后续步骤使用国内镜像）
-ENV HTTP_PROXY=
-ENV HTTPS_PROXY=
-ENV http_proxy=
-ENV https_proxy=
 
 # 安装 Python (Windows 版本)
 ENV WINEPREFIX=/root/.wine
