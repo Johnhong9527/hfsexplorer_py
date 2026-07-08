@@ -32,16 +32,7 @@ jobs:
 
       - name: Build Windows executable
         run: |
-          pyinstaller --onefile --windowed --name HFSExplorer ^
-            --add-data "resources;resources" ^
-            --hidden-import PyQt6.QtWidgets ^
-            --hidden-import PyQt6.QtCore ^
-            --hidden-import PyQt6.QtGui ^
-            --hidden-import Crypto.Cipher.AES ^
-            --hidden-import Crypto.Protocol.KDF ^
-            --hidden-import src.core.hfs ^
-            --hidden-import src.gui.main_window ^
-            main.py
+          pyinstaller --onefile --windowed --name HFSExplorer --add-data "resources;resources" --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -76,16 +67,7 @@ jobs:
 
       - name: Build Linux executable
         run: |
-          pyinstaller --onefile --windowed --name HFSExplorer \
-            --add-data "resources:resources" \
-            --hidden-import PyQt6.QtWidgets \
-            --hidden-import PyQt6.QtCore \
-            --hidden-import PyQt6.QtGui \
-            --hidden-import Crypto.Cipher.AES \
-            --hidden-import Crypto.Protocol.KDF \
-            --hidden-import src.core.hfs \
-            --hidden-import src.gui.main_window \
-            main.py
+          pyinstaller --onefile --windowed --name HFSExplorer --add-data "resources:resources" --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
