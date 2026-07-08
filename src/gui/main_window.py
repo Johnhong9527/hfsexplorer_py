@@ -36,6 +36,8 @@ from src.core.hfs import (
     BTreeFile,
 )
 
+from src.gui.panels.info_panels import FilePropertiesPanel
+
 
 class FileLoadThread(QThread):
     """文件加载线程"""
@@ -294,9 +296,21 @@ class MainWindow(QMainWindow):
         self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_widget.customContextMenuRequested.connect(self._show_context_menu)
         
+        # 信息面板
+        self.info_panel = FilePropertiesPanel()
+        self.info_panel.setMinimumWidth(250)
+        self.info_panel.setMaximumWidth(350)
+        
+        # 创建右侧分割窗口（表格 + 信息面板）
+        right_splitter = QSplitter(Qt.Orientation.Horizontal)
+        right_splitter.addWidget(self.table_widget)
+        right_splitter.addWidget(self.info_panel)
+        right_splitter.setSizes([500, 250])
+        
+        # 主分割窗口（树 + 右侧）
         splitter.addWidget(self.tree_widget)
-        splitter.addWidget(self.table_widget)
-        splitter.setSizes([300, 700])
+        splitter.addWidget(right_splitter)
+        splitter.setSizes([200, 750])
         
         layout.addWidget(splitter)
     
@@ -345,6 +359,9 @@ class MainWindow(QMainWindow):
             f"文件: {result['file_count']:,}, "
             f"文件夹: {result['folder_count']:,}"
         )
+        
+        # 更新信息面板
+        self.info_panel.set_volume_header(self.current_header)
         
         # 加载目录树
         self._load_directory_tree()
@@ -560,6 +577,20 @@ class MainWindow(QMainWindow):
         if selected:
             count = len(set(item.row() for item in selected))
             self.selection_label.setText(f"选择: {count} 个对象")
+            
+            # 显示第一个选中项的信息
+            row = selected[0].row()
+            name_item = self.table_widget.item(row, 0)
+            if name_item:
+                item_data = name_item.data(Qt.ItemDataRole.UserRole)
+                if item_data:
+                    # 更新信息面板
+                    if item_data['type'] == 'file':
+                        # TODO: 获取完整的文件记录并显示
+                        pass
+                    elif item_data['type'] == 'folder':
+                        # TODO: 获取完整的文件夹记录并显示
+                        pass
         else:
             self.selection_label.setText("选择: 0 个对象")
     
