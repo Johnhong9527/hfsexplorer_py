@@ -798,6 +798,206 @@ class CatalogRecordType(IntEnum):
 
 
 # =============================================================================
+# Extents Overflow
+# =============================================================================
+
+class ForkType(IntEnum):
+    """Fork 类型"""
+    DATA = 0x00      # 数据分支
+    RESOURCE = 0xFF  # 资源分支
+
+
+@dataclass
+class HFSPlusExtentKey:
+    """
+    HFS+ Extents Overflow 键
+    
+    12 字节。
+    
+    Attributes:
+        key_length: 键长度（总是 10）
+        fork_type: Fork 类型（0=数据, 0xFF=资源）
+        pad: 填充字节
+        file_id: 文件 CNID
+        start_block: 起始分配块号
+    """
+    key_length: int   # UInt16 - 总是 10
+    fork_type: int    # UInt8 - 0=数据, 0xFF=资源
+    pad: int          # UInt8 - 填充
+    file_id: int      # UInt32 - 文件 CNID
+    start_block: int  # UInt32 - 起始分配块
+    
+    @property
+    def occupied_size(self) -> int:
+        """占用的字节数"""
+        return 2 + self.key_length  # 2 字节 keyLength + 数据
+    
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0) -> 'HFSPlusExtentKey':
+        """从字节序列解析"""
+        key_length, fork_type, pad, file_id, start_block = struct.unpack_from(
+            '>HBBI I', data, offset
+        )
+        return cls(
+            key_length=key_length,
+            fork_type=fork_type,
+            pad=pad,
+            file_id=file_id,
+            start_block=start_block
+        )
+    
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, HFSPlusExtentKey):
+            return False
+        return (self.file_id == other.file_id and
+                self.fork_type == other.fork_type and
+                self.start_block == other.start_block)
+    
+    def __lt__(self, other) -> bool:
+        if self.file_id != other.file_id:
+            return self.file_id < other.file_id
+        if self.fork_type != other.fork_type:
+            return self.fork_type < other.fork_type
+        return self.start_block < other.start_block
+    
+    def __le__(self, other) -> bool:
+        return self == other or self < other
+    
+    def __str__(self) -> str:
+        fork_type_str = "DATA" if self.fork_type == ForkType.DATA else "RESOURCE"
+        return (f"ExtentKey(file={self.file_id}, fork={fork_type_str}, "
+                f"startBlock={self.start_block})")
+
+
+@dataclass
+class HFSPlusExtentDescriptor:
+    """
+    HFS+ Extent 描述符
+    
+    8 字节。
+    
+    Attributes:
+        start_block: 起始分配块号
+        block_count: 分配块数量
+    """
+    start_block: int  # UInt32
+    block_count: int  # UInt32
+    
+    @property
+    def end_block(self) -> int:
+        """结束块号（不包含）"""
+        return self.start_block + self.block_count
+    
+    @property
+    def is_empty(self) -> bool:
+        """是否为空 extent"""
+        return self.block_count == 0
+    
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0) -> 'HFSPlusExtentDescriptor':
+        """从字节序列解析"""
+        start_block, block_count = struct.unpack_from('>II', data, offset)
+        return cls(start_block=start_block, block_count=block_count)
+    
+    def __str__(self) -> str:
+        return f"Extent(start={self.start_block}, count={self.block_count})"
+
+
+@dataclass
+class HFSPlusExtentRecord:
+    """
+    HFS+ Extent 记录
+    
+    包含 8 个 Extent 描述符（64 字节）。
+    
+    Attributes:
+        extents: Extent 描述符列表（最多 8 个）
+    """
+    extents: List[HFSPlusExtentDescriptor]
+    
+    @property
+    def total_blocks(self) -> int:
+        """总分配块数"""
+        return sum(ext.block_count for ext in self.extents)
+    
+    @property
+    def is_empty(self) -> bool:
+        """是否为空记录"""
+        return all(ext.is_empty for ext in self.extents)
+    
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0) -> 'HFSPlusExtentRecord':
+        """从字节序列解析"""
+        extents = []
+        for i in range(8):
+            ext = HFSPlusExtentDescriptor.from_bytes(data, offset + i * 8)
+            if not ext.is_empty:
+                extents.append(ext)
+        return cls(extents=extents)
+    
+    def __str__(self) -> str:
+        return f"ExtentRecord({len(self.extents)} extents, {self.total_blocks} blocks)"
+
+
+# =============================================================================
+# Extents B-tree
+# =============================================================================
+
+class ExtentsBTree(BTreeFile):
+    """
+    Extents Overflow B-tree 读取器
+    
+    继承自 BTreeFile，提供 Extents 特定的解析功能。
+    """
+    
+    def __init__(self, stream: BinaryIO, start_offset: int = 0,
+                 node_size: int = 4096):
+        super().__init__(stream, start_offset, node_size)
+    
+    def get_extents(self, file_id: int, fork_type: int,
+                    start_block: int) -> List[HFSPlusExtentDescriptor]:
+        """
+        获取文件的 extent 列表
+        
+        Args:
+            file_id: 文件 CNID
+            fork_type: Fork 类型 (0=数据, 0xFF=资源)
+            start_block: 起始分配块号
+        
+        Returns:
+            Extent 描述符列表
+        """
+        extents = []
+        
+        # 遍历所有叶记录
+        for node in self.list_leaf_nodes():
+            for i in range(node.num_records):
+                data = node.get_record_data(i)
+                
+                # 解析键
+                key = HFSPlusExtentKey.from_bytes(data)
+                
+                # 检查是否匹配
+                if (key.file_id == file_id and
+                    key.fork_type == fork_type and
+                    key.start_block == start_block):
+                    
+                    # 解析 extent 记录
+                    record = HFSPlusExtentRecord.from_bytes(data, key.occupied_size)
+                    extents.extend(record.extents)
+                    
+                    # 检查是否需要继续查找下一个 extent
+                    if len(record.extents) == 8:
+                        # 可能有更多 extent，继续查找
+                        next_start_block = record.extents[-1].end_block
+                        extents.extend(
+                            self.get_extents(file_id, fork_type, next_start_block)
+                        )
+        
+        return extents
+
+
+# =============================================================================
 # Catalog B-tree 读取器
 # =============================================================================
 
@@ -808,8 +1008,9 @@ class CatalogBTree(BTreeFile):
     继承自 BTreeFile，提供 Catalog 特定的解析功能。
     """
     
-    def __init__(self, stream: BinaryIO, start_offset: int = 0):
-        super().__init__(stream, start_offset)
+    def __init__(self, stream: BinaryIO, start_offset: int = 0,
+                 node_size: int = 4096):
+        super().__init__(stream, start_offset, node_size)
     
     def parse_catalog_key(self, data: bytes, offset: int = 0) -> HFSPlusCatalogKey:
         """解析 Catalog 键"""
@@ -863,3 +1064,85 @@ class CatalogBTree(BTreeFile):
                     })
         
         return results
+
+
+# =============================================================================
+# 文件读取
+# =============================================================================
+
+class HFSPlusFileReader:
+    """
+    HFS+ 文件读取器
+    
+    用于读取文件的数据分支和资源分支。
+    
+    Usage:
+        reader = HFSPlusFileReader(stream, catalog_btree, extents_btree)
+        data = reader.read_data_fork(file_id)
+    """
+    
+    def __init__(self, stream: BinaryIO, 
+                 catalog_btree: CatalogBTree,
+                 extents_btree: ExtentsBTree,
+                 block_size: int = 4096):
+        """
+        初始化文件读取器
+        
+        Args:
+            stream: 可 seek 的二进制流
+            catalog_btree: Catalog B-tree 读取器
+            extents_btree: Extents B-tree 读取器
+            block_size: 分配块大小
+        """
+        self.stream = stream
+        self.catalog_btree = catalog_btree
+        self.extents_btree = extents_btree
+        self.block_size = block_size
+    
+    def read_data_fork(self, file_id: int) -> bytes:
+        """
+        读取文件的数据分支
+        
+        Args:
+            file_id: 文件 CNID
+        
+        Returns:
+            文件数据
+        """
+        # 查找文件记录
+        file_record = self._find_file_record(file_id)
+        if file_record is None:
+            raise FileNotFoundError(f"文件未找到: {file_id}")
+        
+        # 获取内联 extent
+        # 注意：这里简化了实现，实际需要从 Catalog 记录中读取 extent
+        # 目前只支持读取内联 extent（8 个以内）
+        
+        # 读取数据
+        data = b''
+        
+        # 遍历所有 extent
+        # 注意：这里需要实现完整的 extent 读取逻辑
+        # 目前只是一个框架
+        
+        return data
+    
+    def _find_file_record(self, file_id: int):
+        """查找文件记录"""
+        # 遍历所有叶记录
+        for node in self.catalog_btree.list_leaf_nodes():
+            for i in range(node.num_records):
+                data = node.get_record_data(i)
+                
+                # 解析键
+                key = HFSPlusCatalogKey.from_bytes(data)
+                
+                # 解析记录类型
+                record_type = struct.unpack_from('>H', data, key.occupied_size)[0]
+                
+                if record_type == CatalogRecordType.FILE:
+                    file = HFSPlusCatalogFile.from_bytes(data, key.occupied_size)
+                    if file.file_id == file_id:
+                        return file
+        
+        return None
