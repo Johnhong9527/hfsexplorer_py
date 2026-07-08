@@ -40,7 +40,15 @@ from src.core.hfs import (
     SearchResult,
 )
 
+from src.core.crypto import (
+    EncryptedVolumeHeader,
+    EncryptedVolume,
+    Keybag,
+    CryptoError,
+)
+
 from src.gui.panels.info_panels import FilePropertiesPanel
+from src.gui.dialogs.password_dialog import PasswordDialog
 
 
 class FileLoadThread(QThread):
@@ -152,6 +160,10 @@ class MainWindow(QMainWindow):
         self.current_catalog: Optional[CatalogBTree] = None
         self.catalog_offset: int = 0
         self.node_size: int = 4096
+        
+        # 加密卷支持
+        self.encrypted_volume: Optional[EncryptedVolume] = None
+        self.is_encrypted: bool = False
         
         # 搜索引擎
         self.search_engine: Optional[SearchEngine] = None
@@ -360,6 +372,41 @@ class MainWindow(QMainWindow):
         
         # 清空缓存
         self.folder_cache.clear()
+        self.encrypted_volume = None
+        self.is_encrypted = False
+        
+        # 检查是否是加密卷
+        try:
+            with open(path, 'rb') as f:
+                # 读取前 512 字节检查是否是 CoreStorage
+                header_data = f.read(512)
+                if len(header_data) >= 512 and header_data[88:90] == b'CS':
+                    # 是 CoreStorage 卷
+                    self.is_encrypted = True
+                    
+                    # 尝试解析加密卷头
+                    try:
+                        cs_header = EncryptedVolumeHeader(header_data)
+                        if cs_header.is_encrypted:
+                            # 显示密码对话框
+                            password = PasswordDialog.get_password(
+                                self, os.path.basename(path)
+                            )
+                            
+                            if password is None:
+                                # 用户取消
+                                self.setEnabled(True)
+                                return
+                            
+                            # TODO: 实际解密逻辑
+                            QMessageBox.information(
+                                self, "加密卷",
+                                "检测到加密卷，但解密功能尚未完全实现。"
+                            )
+                    except CryptoError as e:
+                        QMessageBox.warning(self, "警告", f"解析加密卷头失败: {e}")
+        except Exception:
+            pass
         
         # 启动加载线程
         self.load_thread = FileLoadThread(path)
