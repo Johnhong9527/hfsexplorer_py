@@ -122,6 +122,13 @@ from .writer import (
     VolumeWriter,
 )
 
+from .btree_mutator import (
+    BTreeMutationError,
+    BTreeMutationResult,
+    BTreeMutator,
+    CatalogMutator,
+)
+
 __all__ = [
     # 常量
     'SIGNATURE_HFS_PLUS',
@@ -209,4 +216,10 @@ __all__ = [
     'CatalogWriter',
     'FileWriter',
     'VolumeWriter',
+    
+    # B-tree 变异
+    'BTreeMutationError',
+    'BTreeMutationResult',
+    'BTreeMutator',
+    'CatalogMutator',
 ]
