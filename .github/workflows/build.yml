@@ -40,11 +40,28 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
+      - name: Create portable version
+        run: |
+          mkdir HFSExplorer-Portable
+          copy dist\HFSExplorer.exe HFSExplorer-Portable\
+          echo This is a portable version. > HFSExplorer-Portable\README.txt
+
+      - name: Install NSIS
+        run: |
+          choco install nsis -y
+
+      - name: Create NSIS installer
+        run: |
+          makensis /NOCD /V3 build\windows\installer.nsi
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-x64
-          path: dist/HFSExplorer.exe
+          name: windows-build
+          path: |
+            dist/HFSExplorer.exe
+            HFSExplorer-Portable/
+            build/windows/HFSExplorer-Setup.exe
 
   build-linux-x64:
     runs-on: ubuntu-22.04
@@ -87,8 +104,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Python dependencies (apt/dnf)
-        if: matrix.pkg_cmd != 'pacman'
+      - name: Install Python dependencies (apt)
+        if: matrix.pkg_cmd == 'apt-get'
+        run: |
+          python3 -m venv /opt/venv
+          source /opt/venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pytest
+
+      - name: Install Python dependencies (dnf)
+        if: matrix.pkg_cmd == 'dnf'
         run: |
           python3 -m pip install --upgrade pip
           pip3 install -r requirements.txt
@@ -103,8 +129,14 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pytest
 
-      - name: Run tests (apt/dnf)
-        if: matrix.pkg_cmd != 'pacman'
+      - name: Run tests (apt)
+        if: matrix.pkg_cmd == 'apt-get'
+        run: |
+          source /opt/venv/bin/activate
+          python -m pytest tests/ -v
+
+      - name: Run tests (dnf)
+        if: matrix.pkg_cmd == 'dnf'
         run: python3 -m pytest tests/ -v
 
       - name: Run tests (pacman)
@@ -116,8 +148,14 @@ jobs:
       - name: Create resources directory
         run: mkdir -p resources
 
-      - name: Build executable (apt/dnf)
-        if: matrix.pkg_cmd != 'pacman'
+      - name: Build executable (apt)
+        if: matrix.pkg_cmd == 'apt-get'
+        run: |
+          source /opt/venv/bin/activate
+          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+
+      - name: Build executable (dnf)
+        if: matrix.pkg_cmd == 'dnf'
         run: |
           pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
@@ -179,8 +217,50 @@ jobs:
           name: linux-arm64-debian
           path: HFSExplorer-arm64-debian
 
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+      - name: Create resources directory
+        run: mkdir -p resources
+
+      - name: Build macOS executable
+        run: |
+          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+
+      - name: Create DMG
+        run: |
+          mkdir -p dmg-root
+          cp -r dist/HFSExplorer.app dmg-root/
+          ln -s /Applications dmg-root/Applications
+          hdiutil create -volname HFSExplorer -srcfolder dmg-root -ov -format UDZO HFSExplorer.dmg
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: |
+            dist/HFSExplorer
+            HFSExplorer.dmg
+
   create-packages:
-    needs: [build-linux-x64]
+    needs: [build-linux-x64, build-linux-arm64]
     runs-on: ubuntu-22.04
     steps:
       - name: Download Ubuntu x64 artifact
@@ -189,23 +269,51 @@ jobs:
           name: linux-x64-ubuntu
           path: build/ubuntu-x64
 
+      - name: Download Fedora x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x64-fedora
+          path: build/fedora-x64
+
       - name: Download Debian x64 artifact
         uses: actions/download-artifact@v4
         with:
           name: linux-x64-debian
           path: build/debian-x64
 
+      - name: Download Arch x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x64-arch
+          path: build/arch-x64
+
+      - name: Download Ubuntu ARM64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64-ubuntu
+          path: build/ubuntu-arm64
+
+      - name: Download Debian ARM64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64-debian
+          path: build/debian-arm64
+
       - name: Make executables executable
         run: |
           chmod +x build/ubuntu-x64/HFSExplorer
+          chmod +x build/fedora-x64/HFSExplorer
           chmod +x build/debian-x64/HFSExplorer
+          chmod +x build/arch-x64/HFSExplorer
+          chmod +x build/ubuntu-arm64/HFSExplorer-arm64-ubuntu
+          chmod +x build/debian-arm64/HFSExplorer-arm64-debian
 
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y fakeroot wget
+          sudo apt-get install -y fakeroot wget rpm
 
-      - name: Create DEB package (Ubuntu)
+      - name: Create DEB package (Ubuntu x64)
         run: |
           mkdir -p hfsexplorer_1.0.0_amd64/DEBIAN
           mkdir -p hfsexplorer_1.0.0_amd64/usr/local/bin
@@ -237,7 +345,7 @@ jobs:
 
           dpkg-deb --build hfsexplorer_1.0.0_amd64
 
-      - name: Create DEB package (Debian)
+      - name: Create DEB package (Debian x64)
         run: |
           mkdir -p hfsexplorer-debian_1.0.0_amd64/DEBIAN
           mkdir -p hfsexplorer-debian_1.0.0_amd64/usr/local/bin
@@ -255,6 +363,76 @@ jobs:
 
           cp build/debian-x64/HFSExplorer hfsexplorer-debian_1.0.0_amd64/usr/local/bin/
           dpkg-deb --build hfsexplorer-debian_1.0.0_amd64
+
+      - name: Create DEB package (Ubuntu ARM64)
+        run: |
+          mkdir -p hfsexplorer_1.0.0_arm64/DEBIAN
+          mkdir -p hfsexplorer_1.0.0_arm64/usr/local/bin
+
+          cat > hfsexplorer_1.0.0_arm64/DEBIAN/control << 'EOF'
+          Package: hfsexplorer
+          Version: 1.0.0
+          Section: utils
+          Priority: optional
+          Architecture: arm64
+          Maintainer: HFSExplorer Team
+          Description: HFS/HFS+/HFSX File System Browser
+           A tool for browsing and extracting HFS/HFS+/HFSX filesystem contents.
+          EOF
+
+          cp build/ubuntu-arm64/HFSExplorer-arm64-ubuntu hfsexplorer_1.0.0_arm64/usr/local/bin/HFSExplorer
+          dpkg-deb --build hfsexplorer_1.0.0_arm64
+
+      - name: Create DEB package (Debian ARM64)
+        run: |
+          mkdir -p hfsexplorer-debian_1.0.0_arm64/DEBIAN
+          mkdir -p hfsexplorer-debian_1.0.0_arm64/usr/local/bin
+
+          cat > hfsexplorer-debian_1.0.0_arm64/DEBIAN/control << 'EOF'
+          Package: hfsexplorer
+          Version: 1.0.0
+          Section: utils
+          Priority: optional
+          Architecture: arm64
+          Maintainer: HFSExplorer Team
+          Description: HFS/HFS+/HFSX File System Browser
+           A tool for browsing and extracting HFS/HFS+/HFSX filesystem contents.
+          EOF
+
+          cp build/debian-arm64/HFSExplorer-arm64-debian hfsexplorer-debian_1.0.0_arm64/usr/local/bin/HFSExplorer
+          dpkg-deb --build hfsexplorer-debian_1.0.0_arm64
+
+      - name: Create RPM package (Fedora x64)
+        run: |
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          cat > rpmbuild/SPECS/hfsexplorer.spec << 'EOF'
+          Name:           hfsexplorer
+          Version:        1.0.0
+          Release:        1%{?dist}
+          Summary:        HFS/HFS+/HFSX File System Browser
+
+          License:        GPLv3
+          URL:            https://github.com/Johnhong9527/hfsexplorer_py
+
+          %description
+          A tool for browsing and extracting HFS/HFS+/HFSX filesystem contents.
+          Supports FileVault 2 encryption and read/write operations.
+
+          %install
+          mkdir -p %{buildroot}/usr/local/bin
+          cp %{_sourcedir}/HFSExplorer %{buildroot}/usr/local/bin/
+
+          %files
+          /usr/local/bin/HFSExplorer
+
+          %changelog
+          * $(date "+%a %b %d %Y") HFSExplorer Team
+          - Initial release
+          EOF
+
+          cp build/fedora-x64/HFSExplorer rpmbuild/SOURCES/
+          rpmbuild -ba rpmbuild/SPECS/hfsexplorer.spec
 
       - name: Create AppImage
         run: |
@@ -292,10 +470,13 @@ jobs:
           path: |
             hfsexplorer_1.0.0_amd64.deb
             hfsexplorer-debian_1.0.0_amd64.deb
+            hfsexplorer_1.0.0_arm64.deb
+            hfsexplorer-debian_1.0.0_arm64.deb
+            rpmbuild/RPMS/x86_64/*.rpm
             HFSExplorer-x86_64.AppImage
 
   release:
-    needs: [build-windows, build-linux-x64, build-linux-arm64, create-packages]
+    needs: [build-windows, build-linux-x64, build-linux-arm64, build-macos, create-packages]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -311,15 +492,22 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/windows-x64/HFSExplorer.exe
+            dist/windows-build/HFSExplorer.exe
+            dist/windows-build/HFSExplorer-Setup.exe
+            dist/windows-build/HFSExplorer-Portable/HFSExplorer.exe
             dist/linux-x64-ubuntu/HFSExplorer
             dist/linux-x64-fedora/HFSExplorer
             dist/linux-x64-debian/HFSExplorer
             dist/linux-x64-arch/HFSExplorer
             dist/linux-arm64-ubuntu/HFSExplorer-arm64-ubuntu
             dist/linux-arm64-debian/HFSExplorer-arm64-debian
+            dist/macos-build/HFSExplorer
+            dist/macos-build/HFSExplorer.dmg
             dist/packages/hfsexplorer_1.0.0_amd64.deb
             dist/packages/hfsexplorer-debian_1.0.0_amd64.deb
+            dist/packages/hfsexplorer_1.0.0_arm64.deb
+            dist/packages/hfsexplorer-debian_1.0.0_arm64.deb
+            dist/packages/*.rpm
             dist/packages/HFSExplorer-x86_64.AppImage
           generate_release_notes: true
           draft: false
