@@ -49,6 +49,7 @@ from src.core.crypto import (
 
 from src.gui.panels.info_panels import FilePropertiesPanel
 from src.gui.dialogs.password_dialog import PasswordDialog
+from src.gui.views.view_manager import ViewManager, ViewMode
 
 
 class FileLoadThread(QThread):
@@ -220,6 +221,27 @@ class MainWindow(QMainWindow):
         
         tools_menu.addSeparator()
         
+        # 视图模式子菜单
+        view_menu = tools_menu.addMenu("视图模式(&V)")
+        
+        icon_view_action = QAction("图标视图", self)
+        icon_view_action.triggered.connect(lambda: self._set_view_mode(ViewMode.ICON))
+        view_menu.addAction(icon_view_action)
+        
+        list_view_action = QAction("列表视图", self)
+        list_view_action.triggered.connect(lambda: self._set_view_mode(ViewMode.LIST))
+        view_menu.addAction(list_view_action)
+        
+        column_view_action = QAction("分栏视图", self)
+        column_view_action.triggered.connect(lambda: self._set_view_mode(ViewMode.COLUMN))
+        view_menu.addAction(column_view_action)
+        
+        gallery_view_action = QAction("画廊视图", self)
+        gallery_view_action.triggered.connect(lambda: self._set_view_mode(ViewMode.GALLERY))
+        view_menu.addAction(gallery_view_action)
+        
+        tools_menu.addSeparator()
+        
         info_action = QAction("卷信息(&I)...", self)
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self._show_volume_info)
@@ -304,7 +326,7 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(address_layout)
         
-        # 分割窗口：树视图 + 表格视图
+        # 分割窗口：树视图 + 内容区域
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # 目录树
@@ -314,7 +336,12 @@ class MainWindow(QMainWindow):
         self.tree_widget.itemClicked.connect(self._on_tree_item_clicked)
         self.tree_widget.itemExpanded.connect(self._on_tree_item_expanded)
         
-        # 文件表格
+        # 视图管理器
+        self.view_manager = ViewManager()
+        self.view_manager.item_clicked.connect(self._on_view_item_clicked)
+        self.view_manager.item_double_clicked.connect(self._on_view_item_double_clicked)
+        
+        # 文件表格（保留用于兼容）
         self.table_widget = QTableWidget()
         self.table_widget.setColumnCount(4)
         self.table_widget.setHorizontalHeaderLabels(["名称", "大小", "类型", "修改时间"])
@@ -337,9 +364,9 @@ class MainWindow(QMainWindow):
         self.info_panel.setMinimumWidth(250)
         self.info_panel.setMaximumWidth(350)
         
-        # 创建右侧分割窗口（表格 + 信息面板）
+        # 创建右侧分割窗口（视图管理器 + 信息面板）
         right_splitter = QSplitter(Qt.Orientation.Horizontal)
-        right_splitter.addWidget(self.table_widget)
+        right_splitter.addWidget(self.view_manager)
         right_splitter.addWidget(self.info_panel)
         right_splitter.setSizes([500, 250])
         
@@ -572,9 +599,38 @@ class MainWindow(QMainWindow):
         # 检查缓存
         if parent_id in self.folder_cache:
             self._update_table(self.folder_cache[parent_id])
+            self._update_view(self.folder_cache[parent_id])
         else:
             # 异步加载
             self._load_folder_async(parent_id)
+    
+    def _update_view(self, contents: list):
+        """更新视图内容"""
+        # 分离文件夹和文件
+        folders = [item for item in contents if item['type'] == 'folder']
+        files = [item for item in contents if item['type'] == 'file']
+        
+        # 排序
+        folders.sort(key=lambda x: x['name'].lower())
+        files.sort(key=lambda x: x['name'].lower())
+        
+        # 合并
+        sorted_items = folders + files
+        
+        # 更新视图管理器
+        self.view_manager.set_items(sorted_items)
+    
+    def _on_view_item_clicked(self, item_data: dict):
+        """视图项目被点击"""
+        # 更新信息面板
+        # TODO: 获取完整的文件/文件夹信息并显示
+        pass
+    
+    def _on_view_item_double_clicked(self, item_data: dict):
+        """视图项目被双击"""
+        if item_data['type'] == 'folder':
+            self._load_folder_contents(item_data['id'])
+            self.up_action.setEnabled(True)
     
     def _update_table(self, contents: list):
         """更新表格内容"""
@@ -914,6 +970,19 @@ class MainWindow(QMainWindow):
         search_edit.returnPressed.connect(do_search)
         
         dialog.exec()
+    
+    def _set_view_mode(self, mode: ViewMode):
+        """设置视图模式"""
+        self.view_manager.set_view_mode(mode)
+        
+        # 更新状态栏
+        mode_names = {
+            ViewMode.ICON: "图标视图",
+            ViewMode.LIST: "列表视图",
+            ViewMode.COLUMN: "分栏视图",
+            ViewMode.GALLERY: "画廊视图",
+        }
+        self.statusBar().showMessage(f"视图模式: {mode_names.get(mode, '未知')}")
     
     def dragEnterEvent(self, event: QDragEnterEvent):
         """拖放进入事件"""
