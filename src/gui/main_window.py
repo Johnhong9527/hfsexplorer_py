@@ -18,10 +18,10 @@ from PyQt6.QtWidgets import (
     QPushButton, QFileDialog, QMessageBox, QHeaderView,
     QTreeWidgetItem, QTableWidgetItem, QApplication,
     QStyle, QAbstractItemView, QProgressDialog,
-    QMenu, QInputDialog
+    QMenu, QInputDialog, QDialog, QComboBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
-from PyQt6.QtGui import QAction, QIcon, QPixmap, QKeySequence, QCursor
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer, QMimeData, QUrl
+from PyQt6.QtGui import QAction, QIcon, QPixmap, QKeySequence, QCursor, QDragEnterEvent, QDropEvent
 
 from src.core.hfs import (
     read_volume_header,
@@ -142,6 +142,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("HFSExplorer")
         self.setMinimumSize(1024, 768)
+        
+        # 启用拖放
+        self.setAcceptDrops(True)
         
         # 当前打开的文件系统
         self.current_path: Optional[str] = None
@@ -864,6 +867,32 @@ class MainWindow(QMainWindow):
         search_edit.returnPressed.connect(do_search)
         
         dialog.exec()
+    
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """拖放进入事件"""
+        # 检查是否接受文件拖放
+        if event.mimeData().hasUrls():
+            # 检查是否有文件
+            for url in event.mimeData().urls():
+                if url.isLocalFile():
+                    event.acceptProposedAction()
+                    return
+        
+        event.ignore()
+    
+    def dropEvent(self, event: QDropEvent):
+        """拖放放下事件"""
+        # 获取拖放的文件
+        files = []
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                files.append(url.toLocalFile())
+        
+        # 打开第一个文件
+        if files:
+            self._load_filesystem(files[0])
+        
+        event.acceptProposedAction()
 
 
 def main():
