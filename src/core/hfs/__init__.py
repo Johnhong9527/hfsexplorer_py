@@ -129,6 +129,13 @@ from .btree_mutator import (
     CatalogMutator,
 )
 
+from .file_writer import (
+    WriteResult,
+    FileDataWriter,
+    ExtentWriter,
+    FileWriter,
+)
+
 __all__ = [
     # 常量
     'SIGNATURE_HFS_PLUS',
@@ -222,4 +229,10 @@ __all__ = [
     'BTreeMutationResult',
     'BTreeMutator',
     'CatalogMutator',
+    
+    # 文件写入
+    'WriteResult',
+    'FileDataWriter',
+    'ExtentWriter',
+    'FileWriter',
 ]
