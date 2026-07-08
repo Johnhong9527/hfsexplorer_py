@@ -1,0 +1,46 @@
+version: 1
+AppDir:
+  path: ./AppDir
+  app_info:
+    id: com.hfsexplorer.desktop
+    name: HFSExplorer
+    icon: hfsexplorer
+    version: latest
+    exec: usr/bin/HFSExplorer
+    exec_args: "$@"
+  apt:
+    arch: amd64
+    sources:
+      - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse'
+        key_url: 'http://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3B4FE6ACC0B21F32'
+    include:
+      - python3
+      - python3-pyqt6
+      - libfuse2
+    exclude: []
+
+  files:
+    include:
+      - dist/HFSExplorer
+    exclude:
+      - usr/share/doc
+      - usr/share/man
+
+  test:
+    fedora-30:
+      image: centos:centos7
+      command: ./AppRun
+      use_host_x: true
+    debian-stable:
+      image: debian:stable
+      command: ./AppRun
+      use_host_x: true
+    ubuntu-18.04:
+      image: ubuntu:bionic
+      command: ./AppRun
+      use_host_x: true
+
+AppImage:
+  arch: x86_64
+  update-information: None
+  sign-key: None
