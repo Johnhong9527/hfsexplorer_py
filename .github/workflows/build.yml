@@ -30,9 +30,12 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -v
 
+      - name: Create resources directory
+        run: if not exist resources mkdir resources
+
       - name: Build Windows executable
         run: |
-          pyinstaller --onefile --windowed --name HFSExplorer --add-data "resources;resources" --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -65,9 +68,12 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -v
 
+      - name: Create resources directory
+        run: mkdir -p resources
+
       - name: Build Linux executable
         run: |
-          pyinstaller --onefile --windowed --name HFSExplorer --add-data "resources:resources" --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
