@@ -439,3 +439,17 @@ class EncryptedVolumeHeader:
             return "AES-XTS"
         else:
             return f"未知 ({self.encryption_method})"
+
+
+# 导入加密卷模块
+try:
+    from .encrypted_volume import (
+        KeybagEntryType,
+        KeybagEntry,
+        Keybag,
+        EncryptedVolume,
+        EncryptedVolumeParser,
+    )
+except ImportError:
+    # 如果导入失败，定义占位类
+    pass
