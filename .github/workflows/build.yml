@@ -46,8 +46,8 @@ jobs:
           name: windows-build
           path: dist/HFSExplorer.exe
 
-  build-linux:
-    runs-on: ubuntu-latest
+  build-ubuntu:
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,7 +55,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.10'
 
       - name: Install system dependencies
         run: |
@@ -74,18 +74,122 @@ jobs:
       - name: Create resources directory
         run: mkdir -p resources
 
-      - name: Build Linux executable
+      - name: Build Ubuntu executable
         run: |
           pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
-      - name: Upload Linux artifacts
+      - name: Upload Ubuntu artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-build
+          name: ubuntu-build
+          path: dist/HFSExplorer
+
+  build-fedora:
+    runs-on: ubuntu-22.04
+    container:
+      image: fedora:39
+    steps:
+      - name: Install system dependencies
+        run: |
+          dnf install -y python3 python3-pip git gcc python3-devel fuse-libs
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r requirements.txt
+          pip3 install pyinstaller pytest
+
+      - name: Run tests
+        run: python3 -m pytest tests/ -v
+
+      - name: Create resources directory
+        run: mkdir -p resources
+
+      - name: Build Fedora executable
+        run: |
+          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+
+      - name: Upload Fedora artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-build
+          path: dist/HFSExplorer
+
+  build-debian:
+    runs-on: ubuntu-22.04
+    container:
+      image: debian:12
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y python3 python3-pip python3-venv git gcc libfuse2
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip --break-system-packages
+          pip3 install -r requirements.txt --break-system-packages
+          pip3 install pyinstaller pytest --break-system-packages
+
+      - name: Run tests
+        run: python3 -m pytest tests/ -v
+
+      - name: Create resources directory
+        run: mkdir -p resources
+
+      - name: Build Debian executable
+        run: |
+          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+
+      - name: Upload Debian artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-build
+          path: dist/HFSExplorer
+
+  build-arch:
+    runs-on: ubuntu-22.04
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install system dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm python python-pip git base-devel fuse2
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+      - name: Create resources directory
+        run: mkdir -p resources
+
+      - name: Build Arch Linux executable
+        run: |
+          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+
+      - name: Upload Arch Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-build
           path: dist/HFSExplorer
 
   release:
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-ubuntu, build-fedora, build-debian, build-arch]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -95,18 +199,39 @@ jobs:
           name: windows-build
           path: dist/windows
 
-      - name: Download Linux artifacts
+      - name: Download Ubuntu artifacts
         uses: actions/download-artifact@v4
         with:
-          name: linux-build
-          path: dist/linux
+          name: ubuntu-build
+          path: dist/ubuntu
+
+      - name: Download Fedora artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: fedora-build
+          path: dist/fedora
+
+      - name: Download Debian artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-build
+          path: dist/debian
+
+      - name: Download Arch Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: arch-build
+          path: dist/arch
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             dist/windows/HFSExplorer.exe
-            dist/linux/HFSExplorer
+            dist/ubuntu/HFSExplorer
+            dist/fedora/HFSExplorer
+            dist/debian/HFSExplorer
+            dist/arch/HFSExplorer
           generate_release_notes: true
           draft: false
           prerelease: false
