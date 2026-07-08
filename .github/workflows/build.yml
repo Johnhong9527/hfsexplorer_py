@@ -55,19 +55,15 @@ jobs:
           - distro: ubuntu
             image: ubuntu:22.04
             pkg_cmd: apt-get
-            py_ver: python3
           - distro: fedora
             image: fedora:39
             pkg_cmd: dnf
-            py_ver: python3
           - distro: debian
             image: debian:12
             pkg_cmd: apt-get
-            py_ver: python3
           - distro: arch
             image: archlinux:latest
             pkg_cmd: pacman
-            py_ver: python
     container:
       image: ${{ matrix.image }}
     steps:
@@ -86,25 +82,49 @@ jobs:
         if: matrix.pkg_cmd == 'pacman'
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm python python-pip git base-devel fuse2 fakeroot
+          pacman -S --noconfirm python python-pip git base-devel fuse2 fakeroot python-virtualenv
 
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (apt/dnf)
+        if: matrix.pkg_cmd != 'pacman'
         run: |
-          ${{ matrix.py_ver }} -m pip install --upgrade pip
+          python3 -m pip install --upgrade pip
           pip3 install -r requirements.txt
           pip3 install pyinstaller pytest
 
-      - name: Run tests
-        run: ${{ matrix.py_ver }} -m pytest tests/ -v
+      - name: Install Python dependencies (pacman)
+        if: matrix.pkg_cmd == 'pacman'
+        run: |
+          python -m venv /opt/venv
+          source /opt/venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pytest
+
+      - name: Run tests (apt/dnf)
+        if: matrix.pkg_cmd != 'pacman'
+        run: python3 -m pytest tests/ -v
+
+      - name: Run tests (pacman)
+        if: matrix.pkg_cmd == 'pacman'
+        run: |
+          source /opt/venv/bin/activate
+          python -m pytest tests/ -v
 
       - name: Create resources directory
         run: mkdir -p resources
 
-      - name: Build executable
+      - name: Build executable (apt/dnf)
+        if: matrix.pkg_cmd != 'pacman'
         run: |
+          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
+
+      - name: Build executable (pacman)
+        if: matrix.pkg_cmd == 'pacman'
+        run: |
+          source /opt/venv/bin/activate
           pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
       - name: Upload artifacts
@@ -115,15 +135,10 @@ jobs:
 
   build-linux-arm64:
     runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        distro: [ubuntu, debian]
-        include:
-          - distro: ubuntu
-            image: arm64v8/ubuntu:22.04
-          - distro: debian
-            image: arm64v8/debian:12
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
@@ -132,28 +147,37 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build in container
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile.arm64
-          platforms: linux/arm64
-          push: false
-          tags: hfsexplorer-arm64:${{ matrix.distro }}
-          build-args: |
-            DISTRO=${{ matrix.distro }}
-
-      - name: Extract artifact
+      - name: Build Ubuntu ARM64
         run: |
-          docker create --name extract hfsexplorer-arm64:${{ matrix.distro }}
-          docker cp extract:/app/dist/HFSExplorer ./HFSExplorer-arm64-${{ matrix.distro }}
-          docker rm extract
+          docker buildx build --file Dockerfile.arm64 --build-arg DISTRO=ubuntu --platform linux/arm64 --load --tag hfsexplorer-arm64:ubuntu .
 
-      - name: Upload artifacts
+      - name: Build Debian ARM64
+        run: |
+          docker buildx build --file Dockerfile.arm64 --build-arg DISTRO=debian --platform linux/arm64 --load --tag hfsexplorer-arm64:debian .
+
+      - name: Extract Ubuntu ARM64 artifact
+        run: |
+          docker create --name extract-ubuntu hfsexplorer-arm64:ubuntu
+          docker cp extract-ubuntu:/app/dist/HFSExplorer ./HFSExplorer-arm64-ubuntu
+          docker rm extract-ubuntu
+
+      - name: Extract Debian ARM64 artifact
+        run: |
+          docker create --name extract-debian hfsexplorer-arm64:debian
+          docker cp extract-debian:/app/dist/HFSExplorer ./HFSExplorer-arm64-debian
+          docker rm extract-debian
+
+      - name: Upload Ubuntu ARM64
         uses: actions/upload-artifact@v4
         with:
-          name: linux-arm64-${{ matrix.distro }}
-          path: HFSExplorer-arm64-${{ matrix.distro }}
+          name: linux-arm64-ubuntu
+          path: HFSExplorer-arm64-ubuntu
+
+      - name: Upload Debian ARM64
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-debian
+          path: HFSExplorer-arm64-debian
 
   create-packages:
     needs: [build-linux-x64]
@@ -179,16 +203,15 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y fakeroot
+          sudo apt-get install -y fakeroot wget
 
       - name: Create DEB package (Ubuntu)
         run: |
           mkdir -p hfsexplorer_1.0.0_amd64/DEBIAN
           mkdir -p hfsexplorer_1.0.0_amd64/usr/local/bin
           mkdir -p hfsexplorer_1.0.0_amd64/usr/share/applications
-          mkdir -p hfsexplorer_1.0.0_amd64/usr/share/icons/hicolor/256x256/apps
 
-          cat > hfsexplorer_1.0.0_amd64/DEBIAN/control << EOF
+          cat > hfsexplorer_1.0.0_amd64/DEBIAN/control << 'EOF'
           Package: hfsexplorer
           Version: 1.0.0
           Section: utils
@@ -202,12 +225,11 @@ jobs:
 
           cp build/ubuntu-x64/HFSExplorer hfsexplorer_1.0.0_amd64/usr/local/bin/
 
-          cat > hfsexplorer_1.0.0_amd64/usr/share/applications/hfsexplorer.desktop << EOF
+          cat > hfsexplorer_1.0.0_amd64/usr/share/applications/hfsexplorer.desktop << 'EOF'
           [Desktop Entry]
           Name=HFSExplorer
           Comment=HFS/HFS+/HFSX File System Browser
           Exec=/usr/local/bin/HFSExplorer
-          Icon=hfsexplorer
           Terminal=false
           Type=Application
           Categories=Utility;FileTools;
@@ -220,7 +242,7 @@ jobs:
           mkdir -p hfsexplorer-debian_1.0.0_amd64/DEBIAN
           mkdir -p hfsexplorer-debian_1.0.0_amd64/usr/local/bin
 
-          cat > hfsexplorer-debian_1.0.0_amd64/DEBIAN/control << EOF
+          cat > hfsexplorer-debian_1.0.0_amd64/DEBIAN/control << 'EOF'
           Package: hfsexplorer
           Version: 1.0.0
           Section: utils
@@ -238,33 +260,29 @@ jobs:
         run: |
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
           cp build/ubuntu-x64/HFSExplorer AppDir/usr/bin/
 
-          cat > AppDir/usr/share/applications/hfsexplorer.desktop << EOF
+          cat > AppDir/usr/share/applications/hfsexplorer.desktop << 'EOF'
           [Desktop Entry]
           Name=HFSExplorer
           Comment=HFS/HFS+/HFSX File System Browser
           Exec=HFSExplorer
-          Icon=hfsexplorer
           Terminal=false
           Type=Application
           Categories=Utility;FileTools;
           EOF
 
-          cat > AppDir/AppRun << EOF
+          cat > AppDir/AppRun << 'EOF'
           #!/bin/bash
-          HERE="\$(dirname "\$(readlink -f "\$0")")"
-          exec "\$HERE/usr/bin/HFSExplorer" "\$@"
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/HFSExplorer" "$@"
           EOF
           chmod +x AppDir/AppRun
 
-          # Download AppImageTool
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
 
-          # Create AppImage
           ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir HFSExplorer-x86_64.AppImage
 
       - name: Upload packages
