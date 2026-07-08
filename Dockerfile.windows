@@ -1,5 +1,9 @@
 FROM ubuntu:22.04
 
+# 使用国内镜像源
+RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+
 # 安装 Wine 和依赖
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
@@ -10,23 +14,27 @@ RUN dpkg --add-architecture i386 && \
     xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Wine
+# 安装 Wine (使用国内镜像)
 RUN mkdir -pm755 /etc/apt/keyrings && \
-    wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
-    wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources && \
+    wget -O /etc/apt/keyrings/winehq-archive.key https://mirrors.tuna.tsinghua.edu.cn/wine-builds/winehq.key && \
+    wget -NP /etc/apt/sources.list.d/ https://mirrors.tuna.tsinghua.edu.cn/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources && \
     apt-get update && \
     apt-get install -y --install-recommends winehq-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# 安装 Python (Windows 版本)
+# 安装 Python (Windows 版本) - 使用国内镜像
 ENV WINEPREFIX=/root/.wine
 ENV WINEDEBUG=-all
 ENV PYTHON_VERSION=3.12.0
 
 RUN xvfb-run wine wineboot --init && \
-    wget -q https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-amd64.exe -O /tmp/python-installer.exe && \
+    wget -q https://mirrors.tuna.tsinghua.edu.cn/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-amd64.exe -O /tmp/python-installer.exe && \
     xvfb-run wine /tmp/python-installer.exe /quiet InstallAllUsers=1 PrependPath=1 && \
     rm /tmp/python-installer.exe
+
+# 配置 pip 使用国内源
+RUN mkdir -p /root/.wine/drive_c/users/root/AppData/Roaming/pip && \
+    echo "[global]\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\ntrusted-host = pypi.tuna.tsinghua.edu.cn" > /root/.wine/drive_c/users/root/AppData/Roaming/pip/pip.ini
 
 # 安装 Python 依赖
 COPY requirements.txt /app/requirements.txt
