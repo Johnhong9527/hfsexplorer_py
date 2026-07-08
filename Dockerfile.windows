@@ -1,61 +1,25 @@
-FROM ubuntu:22.04
+FROM scottyhardy/docker-wine:latest
 
-# 使用国内镜像源
-RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+# 设置工作目录
+WORKDIR /app
 
-# 安装基础依赖
-RUN dpkg --add-architecture i386 && \
-    apt-get update && \
-    apt-get install -y \
-    wget \
-    software-properties-common \
-    apt-transport-https \
-    xvfb \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 Wine (使用代理下载)
-RUN mkdir -pm755 /etc/apt/keyrings && \
-    HTTP_PROXY=http://host.docker.internal:7890 \
-    HTTPS_PROXY=http://host.docker.internal:7890 \
-    wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
-    HTTP_PROXY=http://host.docker.internal:7890 \
-    HTTPS_PROXY=http://host.docker.internal:7890 \
-    wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources && \
-    apt-get update && \
-    apt-get install -y --install-recommends winehq-stable && \
-    rm -rf /var/lib/apt/lists/*
-
-# 安装 Python (Windows 版本)
-ENV WINEPREFIX=/root/.wine
-ENV WINEDEBUG=-all
-ENV PYTHON_VERSION=3.12.0
-
-RUN xvfb-run wine wineboot --init && \
-    wget -q https://mirrors.tuna.tsinghua.edu.cn/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-amd64.exe -O /tmp/python-installer.exe && \
-    xvfb-run wine /tmp/python-installer.exe /quiet InstallAllUsers=1 PrependPath=1 && \
-    rm /tmp/python-installer.exe
-
-# 配置 pip 使用国内源
-RUN mkdir -p /root/.wine/drive_c/users/root/AppData/Roaming/pip && \
-    echo "[global]\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\ntrusted-host = pypi.tuna.tsinghua.edu.cn" > /root/.wine/drive_c/users/root/AppData/Roaming/pip/pip.ini
+# 复制依赖文件
+COPY requirements.txt .
 
 # 安装 Python 依赖
-COPY requirements.txt /app/requirements.txt
-WORKDIR /app
-RUN xvfb-run wine python -m pip install --upgrade pip && \
-    xvfb-run wine pip install -r requirements.txt && \
-    xvfb-run wine pip install pyinstaller pytest
+RUN wine python -m pip install --upgrade pip && \
+    wine pip install -r requirements.txt && \
+    wine pip install pyinstaller pytest
 
 # 复制项目文件
 COPY . .
 
 # 运行测试
-RUN xvfb-run wine python -m pytest tests/ -v
+RUN wine python -m pytest tests/ -v
 
 # 构建 Windows 可执行文件
 RUN mkdir -p resources && \
-    xvfb-run wine pyinstaller --onefile --windowed --name HFSExplorer \
+    wine pyinstaller --onefile --windowed --name HFSExplorer \
     --hidden-import PyQt6.QtWidgets \
     --hidden-import PyQt6.QtCore \
     --hidden-import PyQt6.QtGui \
