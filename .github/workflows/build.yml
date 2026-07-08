@@ -256,17 +256,17 @@ jobs:
 
           %install
           mkdir -p %{buildroot}/usr/local/bin
-          cp %{_sourcedir}/HFSExplorer %{buildroot}/usr/local/bin/
+          install -m 755 %{_sourcedir}/HFSExplorer %{buildroot}/usr/local/bin/
 
           %files
           /usr/local/bin/HFSExplorer
 
           %changelog
-          * $(date "+%a %b %d %Y") HFSExplorer Team
+          * Mon Jul 08 2026 HFSExplorer Team <dev@hfsexplorer.org> - 1.0.0-1
           - Initial release
           EOF
 
-          cp build/fedora-x64/HFSExplorer rpmbuild/SOURCES/
+          cp build/fedora-x64/HFSExplorer rpmbuild/SOURCES/HFSExplorer
           rpmbuild -ba rpmbuild/SPECS/hfsexplorer.spec
 
       - name: Create AppImage
