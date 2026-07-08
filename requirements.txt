@@ -7,28 +7,13 @@ PyQt6-sip>=13.4.0
 
 # 加密库
 pycryptodome>=3.15.0
+pycryptodomex>=3.15.0
 
 # 打包工具
 pyinstaller>=5.0
-nuitka>=1.0
 
 # 测试框架
 pytest>=7.0
-pytest-cov>=4.0
-pytest-mock>=3.0
-
-# 代码质量
-flake8>=6.0
-mypy>=1.0
-black>=23.0
-isort>=5.0
-
-# 类型检查
-types-pycryptodome>=3.15.0
-
-# 文档生成
-sphinx>=6.0
-sphinx-rtd-theme>=1.0
 
 # 其他工具
 colorama>=0.4.6

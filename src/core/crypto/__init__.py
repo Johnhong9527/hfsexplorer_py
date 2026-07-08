@@ -10,14 +10,20 @@ import hmac
 import struct
 from typing import Optional, Tuple
 
-# 尝试导入 pycryptodome
+# 尝试导入 pycryptodome 或 pycryptodomex
 try:
     from Crypto.Cipher import AES
     from Crypto.Protocol.KDF import PBKDF2
     from Crypto.Random import get_random_bytes
     HAS_PYCRYPTODOME = True
 except ImportError:
-    HAS_PYCRYPTODOME = False
+    try:
+        from Cryptodome.Cipher import AES
+        from Cryptodome.Protocol.KDF import PBKDF2
+        from Cryptodome.Random import get_random_bytes
+        HAS_PYCRYPTODOME = True
+    except ImportError:
+        HAS_PYCRYPTODOME = False
 
 # 尝试导入 cryptography
 try:
