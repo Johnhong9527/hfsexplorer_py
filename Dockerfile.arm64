@@ -1,0 +1,30 @@
+ARG DISTRO=ubuntu
+
+FROM arm64v8/ubuntu:22.04 as base-ubuntu
+RUN apt-get update && apt-get install -y python3 python3-pip git gcc python3-dev libfuse2
+
+FROM arm64v8/debian:12 as base-debian
+RUN apt-get update && apt-get install -y python3 python3-pip python3-venv git gcc python3-dev libfuse2
+
+FROM base-${DISTRO}
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip3 install --upgrade pip
+RUN pip3 install -r requirements.txt
+RUN pip3 install pyinstaller pytest
+
+COPY . .
+
+RUN mkdir -p resources
+RUN python3 -m pytest tests/ -v
+RUN pyinstaller --onefile --windowed --name HFSExplorer \
+    --hidden-import PyQt6.QtWidgets \
+    --hidden-import PyQt6.QtCore \
+    --hidden-import PyQt6.QtGui \
+    --hidden-import src.core.hfs \
+    --hidden-import src.gui.main_window \
+    main.py
+
+CMD ["echo", "Build complete"]
