@@ -98,6 +98,13 @@ from .btree import (
     HFSPlusFileReader,
 )
 
+from .extractor import (
+    ExtractionError,
+    FileExtractor,
+    FolderExtractor,
+    ExtractionProgress,
+)
+
 __all__ = [
     # 常量
     'SIGNATURE_HFS_PLUS',
@@ -140,4 +147,34 @@ __all__ = [
     'read_volume_header',
     'is_hfs_plus_volume',
     'get_volume_info',
+    
+    # B-tree
+    'BTNodeDescriptor',
+    'BTHeaderRec',
+    'BTreeNode',
+    'BTIndexRecord',
+    'BTLeafRecord',
+    'BTreeFile',
+    
+    # Catalog
+    'HFSPlusCatalogKey',
+    'HFSPlusCatalogFolder',
+    'HFSPlusCatalogFile',
+    'CatalogBTree',
+    
+    # Extents
+    'ForkType',
+    'HFSPlusExtentKey',
+    'HFSPlusExtentDescriptor',
+    'HFSPlusExtentRecord',
+    'ExtentsBTree',
+    
+    # 文件读取
+    'HFSPlusFileReader',
+    
+    # 提取器
+    'ExtractionError',
+    'FileExtractor',
+    'FolderExtractor',
+    'ExtractionProgress',
 ]
