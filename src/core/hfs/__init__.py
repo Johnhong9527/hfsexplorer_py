@@ -113,6 +113,15 @@ from .search import (
     SearchDialog,
 )
 
+from .writer import (
+    WriteError,
+    AllocationBitmap,
+    BTreeWriter,
+    CatalogWriter,
+    FileWriter,
+    VolumeWriter,
+)
+
 __all__ = [
     # 常量
     'SIGNATURE_HFS_PLUS',
@@ -192,4 +201,12 @@ __all__ = [
     'SearchResult',
     'SearchEngine',
     'SearchDialog',
+    
+    # 写操作
+    'WriteError',
+    'AllocationBitmap',
+    'BTreeWriter',
+    'CatalogWriter',
+    'FileWriter',
+    'VolumeWriter',
 ]
