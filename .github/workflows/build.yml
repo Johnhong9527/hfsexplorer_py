@@ -40,28 +40,11 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
 
-      - name: Create portable version
-        run: |
-          mkdir HFSExplorer-Portable
-          copy dist\HFSExplorer.exe HFSExplorer-Portable\
-          echo HFSExplorer Portable Version > HFSExplorer-Portable\README.txt
-
-      - name: Install NSIS
-        run: |
-          choco install nsis -y
-
-      - name: Create NSIS installer
-        run: |
-          "C:\Program Files (x86)\NSIS\makensis.exe" /NOCD /V3 build\windows\installer.nsi
-
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build
-          path: |
-            dist/HFSExplorer.exe
-            HFSExplorer-Portable/
-            build/windows/HFSExplorer-Setup.exe
+          name: windows-x64
+          path: dist/HFSExplorer.exe
 
   build-linux-x64:
     runs-on: ubuntu-22.04
@@ -163,54 +146,8 @@ jobs:
           name: linux-x64-${{ matrix.distro }}
           path: dist/HFSExplorer
 
-  build-linux-arm64:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Ubuntu ARM64
-        run: |
-          docker buildx build --file Dockerfile.arm64 --build-arg DISTRO=ubuntu --platform linux/arm64 --load --tag hfsexplorer-arm64:ubuntu .
-
-      - name: Build Debian ARM64
-        run: |
-          docker buildx build --file Dockerfile.arm64 --build-arg DISTRO=debian --platform linux/arm64 --load --tag hfsexplorer-arm64:debian .
-
-      - name: Extract Ubuntu ARM64 artifact
-        run: |
-          docker create --name extract-ubuntu hfsexplorer-arm64:ubuntu
-          docker cp extract-ubuntu:/app/dist/HFSExplorer ./HFSExplorer-arm64-ubuntu
-          docker rm extract-ubuntu
-
-      - name: Extract Debian ARM64 artifact
-        run: |
-          docker create --name extract-debian hfsexplorer-arm64:debian
-          docker cp extract-debian:/app/dist/HFSExplorer ./HFSExplorer-arm64-debian
-          docker rm extract-debian
-
-      - name: Upload Ubuntu ARM64
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-arm64-ubuntu
-          path: HFSExplorer-arm64-ubuntu
-
-      - name: Upload Debian ARM64
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-arm64-debian
-          path: HFSExplorer-arm64-debian
-
   create-packages:
-    needs: [build-linux-x64, build-linux-arm64]
+    needs: [build-linux-x64]
     runs-on: ubuntu-22.04
     steps:
       - name: Download Ubuntu x64 artifact
@@ -237,33 +174,19 @@ jobs:
           name: linux-x64-arch
           path: build/arch-x64
 
-      - name: Download Ubuntu ARM64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-arm64-ubuntu
-          path: build/ubuntu-arm64
-
-      - name: Download Debian ARM64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-arm64-debian
-          path: build/debian-arm64
-
       - name: Make executables executable
         run: |
           chmod +x build/ubuntu-x64/HFSExplorer
           chmod +x build/fedora-x64/HFSExplorer
           chmod +x build/debian-x64/HFSExplorer
           chmod +x build/arch-x64/HFSExplorer
-          chmod +x build/ubuntu-arm64/HFSExplorer-arm64-ubuntu
-          chmod +x build/debian-arm64/HFSExplorer-arm64-debian
 
       - name: Install packaging tools
         run: |
           sudo apt-get update
           sudo apt-get install -y fakeroot wget rpm
 
-      - name: Create DEB package (Ubuntu x64)
+      - name: Create DEB package (Ubuntu)
         run: |
           mkdir -p hfsexplorer_1.0.0_amd64/DEBIAN
           mkdir -p hfsexplorer_1.0.0_amd64/usr/local/bin
@@ -295,7 +218,7 @@ jobs:
 
           dpkg-deb --build hfsexplorer_1.0.0_amd64
 
-      - name: Create DEB package (Debian x64)
+      - name: Create DEB package (Debian)
         run: |
           mkdir -p hfsexplorer-debian_1.0.0_amd64/DEBIAN
           mkdir -p hfsexplorer-debian_1.0.0_amd64/usr/local/bin
@@ -314,45 +237,7 @@ jobs:
           cp build/debian-x64/HFSExplorer hfsexplorer-debian_1.0.0_amd64/usr/local/bin/
           dpkg-deb --build hfsexplorer-debian_1.0.0_amd64
 
-      - name: Create DEB package (Ubuntu ARM64)
-        run: |
-          mkdir -p hfsexplorer_1.0.0_arm64/DEBIAN
-          mkdir -p hfsexplorer_1.0.0_arm64/usr/local/bin
-
-          cat > hfsexplorer_1.0.0_arm64/DEBIAN/control << 'EOF'
-          Package: hfsexplorer
-          Version: 1.0.0
-          Section: utils
-          Priority: optional
-          Architecture: arm64
-          Maintainer: HFSExplorer Team
-          Description: HFS/HFS+/HFSX File System Browser
-           A tool for browsing and extracting HFS/HFS+/HFSX filesystem contents.
-          EOF
-
-          cp build/ubuntu-arm64/HFSExplorer-arm64-ubuntu hfsexplorer_1.0.0_arm64/usr/local/bin/HFSExplorer
-          dpkg-deb --build hfsexplorer_1.0.0_arm64
-
-      - name: Create DEB package (Debian ARM64)
-        run: |
-          mkdir -p hfsexplorer-debian_1.0.0_arm64/DEBIAN
-          mkdir -p hfsexplorer-debian_1.0.0_arm64/usr/local/bin
-
-          cat > hfsexplorer-debian_1.0.0_arm64/DEBIAN/control << 'EOF'
-          Package: hfsexplorer
-          Version: 1.0.0
-          Section: utils
-          Priority: optional
-          Architecture: arm64
-          Maintainer: HFSExplorer Team
-          Description: HFS/HFS+/HFSX File System Browser
-           A tool for browsing and extracting HFS/HFS+/HFSX filesystem contents.
-          EOF
-
-          cp build/debian-arm64/HFSExplorer-arm64-debian hfsexplorer-debian_1.0.0_arm64/usr/local/bin/HFSExplorer
-          dpkg-deb --build hfsexplorer-debian_1.0.0_arm64
-
-      - name: Create RPM package (Fedora x64)
+      - name: Create RPM package (Fedora)
         run: |
           mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
@@ -420,13 +305,11 @@ jobs:
           path: |
             hfsexplorer_1.0.0_amd64.deb
             hfsexplorer-debian_1.0.0_amd64.deb
-            hfsexplorer_1.0.0_arm64.deb
-            hfsexplorer-debian_1.0.0_arm64.deb
             rpmbuild/RPMS/x86_64/*.rpm
             HFSExplorer-x86_64.AppImage
 
   release:
-    needs: [build-windows, build-linux-x64, build-linux-arm64, create-packages]
+    needs: [build-windows, build-linux-x64, create-packages]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -442,19 +325,13 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/windows-build/HFSExplorer.exe
-            dist/windows-build/HFSExplorer-Setup.exe
-            dist/windows-build/HFSExplorer-Portable/HFSExplorer.exe
+            dist/windows-x64/HFSExplorer.exe
             dist/linux-x64-ubuntu/HFSExplorer
             dist/linux-x64-fedora/HFSExplorer
             dist/linux-x64-debian/HFSExplorer
             dist/linux-x64-arch/HFSExplorer
-            dist/linux-arm64-ubuntu/HFSExplorer-arm64-ubuntu
-            dist/linux-arm64-debian/HFSExplorer-arm64-debian
             dist/packages/hfsexplorer_1.0.0_amd64.deb
             dist/packages/hfsexplorer-debian_1.0.0_amd64.deb
-            dist/packages/hfsexplorer_1.0.0_arm64.deb
-            dist/packages/hfsexplorer-debian_1.0.0_arm64.deb
             dist/packages/*.rpm
             dist/packages/HFSExplorer-x86_64.AppImage
           generate_release_notes: true
