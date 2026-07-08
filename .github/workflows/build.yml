@@ -43,25 +43,11 @@ jobs:
             --hidden-import src.gui.main_window ^
             main.py
 
-      - name: Create Windows installer
-        uses: nicedoc/action-windows-installer@v1
-        with:
-          name: HFSExplorer
-          version: ${{ github.ref_name }}
-          icon: resources/icon.ico
-          setup-icon: resources/icon.ico
-          publisher: HFSExplorer
-          licence: LICENSE
-          input: dist/HFSExplorer.exe
-          output: dist/HFSExplorer-Setup.exe
-
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: |
-            dist/HFSExplorer.exe
-            dist/HFSExplorer-Setup.exe
+          path: dist/HFSExplorer.exe
 
   build-linux:
     runs-on: ubuntu-latest
@@ -101,18 +87,11 @@ jobs:
             --hidden-import src.gui.main_window \
             main.py
 
-      - name: Create AppImage
-        uses: AppImageCrafters/build-appimage@v1
-        with:
-          recipe: AppImageBuilder.yml
-
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: |
-            dist/HFSExplorer
-            dist/HFSExplorer-*.AppImage
+          path: dist/HFSExplorer
 
   release:
     needs: [build-windows, build-linux]
@@ -136,9 +115,7 @@ jobs:
         with:
           files: |
             dist/windows/HFSExplorer.exe
-            dist/windows/HFSExplorer-Setup.exe
             dist/linux/HFSExplorer
-            dist/linux/HFSExplorer-*.AppImage
           generate_release_notes: true
           draft: false
           prerelease: false
