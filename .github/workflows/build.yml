@@ -44,16 +44,15 @@ jobs:
         run: |
           mkdir HFSExplorer-Portable
           copy dist\HFSExplorer.exe HFSExplorer-Portable\
-          echo This is a portable version. > HFSExplorer-Portable\README.txt
+          echo HFSExplorer Portable Version > HFSExplorer-Portable\README.txt
 
       - name: Install NSIS
         run: |
           choco install nsis -y
-          echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
 
       - name: Create NSIS installer
         run: |
-          makensis /NOCD /V3 build\windows\installer.nsi
+          "C:\Program Files (x86)\NSIS\makensis.exe" /NOCD /V3 build\windows\installer.nsi
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -209,48 +208,6 @@ jobs:
         with:
           name: linux-arm64-debian
           path: HFSExplorer-arm64-debian
-
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller pytest
-
-      - name: Run tests
-        run: python -m pytest tests/ -v
-
-      - name: Create resources directory
-        run: mkdir -p resources
-
-      - name: Build macOS executable
-        run: |
-          pyinstaller --onefile --windowed --name HFSExplorer --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import src.core.hfs --hidden-import src.gui.main_window main.py
-
-      - name: Create DMG
-        run: |
-          mkdir -p dmg-root
-          cp -r dist/HFSExplorer.app dmg-root/
-          ln -s /Applications dmg-root/Applications
-          hdiutil create -volname HFSExplorer -srcfolder dmg-root -ov -format UDZO HFSExplorer.dmg
-
-      - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-build
-          path: |
-            dist/HFSExplorer
-            HFSExplorer.dmg
 
   create-packages:
     needs: [build-linux-x64, build-linux-arm64]
@@ -469,7 +426,7 @@ jobs:
             HFSExplorer-x86_64.AppImage
 
   release:
-    needs: [build-windows, build-linux-x64, build-linux-arm64, build-macos, create-packages]
+    needs: [build-windows, build-linux-x64, build-linux-arm64, create-packages]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -494,8 +451,6 @@ jobs:
             dist/linux-x64-arch/HFSExplorer
             dist/linux-arm64-ubuntu/HFSExplorer-arm64-ubuntu
             dist/linux-arm64-debian/HFSExplorer-arm64-debian
-            dist/macos-build/HFSExplorer
-            dist/macos-build/HFSExplorer.dmg
             dist/packages/hfsexplorer_1.0.0_amd64.deb
             dist/packages/hfsexplorer-debian_1.0.0_amd64.deb
             dist/packages/hfsexplorer_1.0.0_arm64.deb
