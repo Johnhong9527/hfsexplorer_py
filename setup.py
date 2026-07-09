@@ -5,11 +5,11 @@ from setuptools import setup, find_packages
 
 setup(
     name="hfsexplorer",
-    version="1.0.0",
-    description="HFS/HFS+/HFSX 文件系统浏览器 - 支持读写和 FileVault 2 加密",
+    version="0.1.0-alpha",
+    description="HFS+/HFSX 只读文件系统浏览器 (Alpha)",
     author="HFSExplorer Team",
     author_email="dev@hfsexplorer.org",
-    url="https://github.com/hfsexplorer/hfsexplorer",
+    url="https://github.com/Johnhong9527/hfsexplorer_py",
     license="GPL-3.0-or-later",
     packages=find_packages(where="."),
     package_dir={"": "."},
@@ -37,7 +37,6 @@ setup(
     entry_points={
         "console_scripts": [
             "hfsexplorer=src.gui.main_window:main",
-            "unhfs=src.cli.unhfs:main",
         ],
     },
     classifiers=[

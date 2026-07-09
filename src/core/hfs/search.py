@@ -161,7 +161,7 @@ class SearchEngine:
                     # 添加额外信息
                     if record_type == CatalogRecordType.FILE:
                         file = HFSPlusCatalogFile.from_bytes(data, key.occupied_size)
-                        result.size = file.data_fork_size
+                        result.size = file.get_data_fork_size()
                         result.create_date = file.create_date
                         result.mod_date = file.content_mod_date
                         result.item_id = file.file_id

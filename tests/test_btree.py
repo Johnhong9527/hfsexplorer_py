@@ -385,23 +385,30 @@ class TestHFSPlusCatalogKey:
     def test_create(self):
         """测试创建 Catalog 键"""
         key = HFSPlusCatalogKey(
-            key_length=14,
+            key_length=16,  # 4 (parentID) + 2 (HFSUniStr255.length) + 8*2 (chars)
             parent_id=2,
             node_name='test.txt'
         )
-        assert key.key_length == 14
+        assert key.key_length == 16
         assert key.parent_id == 2
         assert key.node_name == 'test.txt'
-        assert key.occupied_size == 16  # 2 + 14
+        assert key.occupied_size == 18  # 2 + 16
     
     def test_from_bytes(self):
-        """测试从字节解析"""
-        # 构造测试数据
+        """测试从字节解析
+        
+        按 TN1150 规范构造数据：
+        - keyLength (UInt16): 包含 parentID(4) + HFSUniStr255(2 + 2*numChars)
+        - parentID (UInt32): 父文件夹 CNID
+        - nodeName (HFSUniStr255): UInt16 length + UInt16[] unicode
+        """
         name = 'test.txt'.encode('utf-16-be')
-        data = struct.pack('>HI', 4 + len(name), 2) + name
+        # keyLength = 4 (parentID) + 2 (HFSUniStr255.length) + len(name) (unicode chars)
+        key_length = 4 + 2 + len(name)
+        data = struct.pack('>HI', key_length, 2) + struct.pack('>H', len(name) // 2) + name
         
         key = HFSPlusCatalogKey.from_bytes(data)
-        assert key.key_length == 4 + len(name)
+        assert key.key_length == key_length
         assert key.parent_id == 2
         assert key.node_name == 'test.txt'
 

@@ -91,7 +91,7 @@ class FileDataWriter:
             
             # 计算需要的块数
             end_offset = offset + len(data)
-            current_blocks = file_record.data_fork_blocks
+            current_blocks = file_record.get_data_fork_blocks()
             
             # 计算新的块数
             new_blocks_needed = (end_offset + self.block_size - 1) // self.block_size
@@ -153,7 +153,7 @@ class FileDataWriter:
             
             # 计算新的块数
             new_blocks_needed = (new_size + self.block_size - 1) // self.block_size
-            current_blocks = file_record.data_fork_blocks
+            current_blocks = file_record.get_data_fork_blocks()
             
             # 如果需要释放块
             if new_blocks_needed < current_blocks:

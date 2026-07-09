@@ -162,7 +162,7 @@ class FileExtractor:
             文件数据
         """
         # 获取文件大小
-        file_size = file_record.data_fork_size
+        file_size = file_record.get_data_fork_size()
         
         if file_size == 0:
             return b''
@@ -196,12 +196,12 @@ class FileExtractor:
         
         return {
             'id': file_record.file_id,
-            'size': file_record.data_fork_size,
+            'size': file_record.get_data_fork_size(),
             'create_date': file_record.create_date,
             'mod_date': file_record.content_mod_date,
-            'owner_id': file_record.owner_id,
-            'group_id': file_record.group_id,
-            'mode': file_record.file_mode,
+            'owner_id': file_record.get_owner_id(),
+            'group_id': file_record.get_group_id(),
+            'mode': file_record.get_file_mode(),
         }
 
 

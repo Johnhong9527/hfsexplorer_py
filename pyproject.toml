@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hfsexplorer"
-version = "1.0.0"
-description = "HFS/HFS+/HFSX 文件系统浏览器 - 支持读写和 FileVault 2 加密"
+version = "0.1.0-alpha"
+description = "HFS+/HFSX 只读文件系统浏览器 (Alpha)"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.9"
@@ -33,14 +33,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/hfsexplorer/hfsexplorer"
-Documentation = "https://hfsexplorer.readthedocs.io"
-Repository = "https://github.com/hfsexplorer/hfsexplorer"
-Issues = "https://github.com/hfsexplorer/hfsexplorer/issues"
+Homepage = "https://github.com/Johnhong9527/hfsexplorer_py"
+Repository = "https://github.com/Johnhong9527/hfsexplorer_py"
+Issues = "https://github.com/Johnhong9527/hfsexplorer_py/issues"
 
 [project.scripts]
 hfsexplorer = "src.gui.main_window:main"
-unhfs = "src.cli.unhfs:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

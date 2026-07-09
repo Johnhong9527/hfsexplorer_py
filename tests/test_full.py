@@ -395,13 +395,20 @@ class TestIntegration:
         assert is_hfs_plus_volume(stream) is True
     
     def test_catalog_key_parsing(self):
-        """测试 Catalog 键解析"""
-        # 构造测试数据
+        """测试 Catalog 键解析
+        
+        按 TN1150 规范构造数据：
+        - keyLength (UInt16): 包含 parentID(4) + HFSUniStr255(2 + 2*numChars)
+        - parentID (UInt32): 父文件夹 CNID
+        - nodeName (HFSUniStr255): UInt16 length + UInt16[] unicode
+        """
         name = 'test.txt'.encode('utf-16-be')
-        data = struct.pack('>HI', 4 + len(name), 2) + name
+        # keyLength = 4 (parentID) + 2 (HFSUniStr255.length) + len(name) (unicode chars)
+        key_length = 4 + 2 + len(name)
+        data = struct.pack('>HI', key_length, 2) + struct.pack('>H', len(name) // 2) + name
         
         key = HFSPlusCatalogKey.from_bytes(data)
-        assert key.key_length == 4 + len(name)
+        assert key.key_length == key_length
         assert key.parent_id == 2
         assert key.node_name == 'test.txt'
         assert key.occupied_size == 2 + key.key_length

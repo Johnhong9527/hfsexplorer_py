@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("HFSExplorer")
+        self.setWindowTitle("HFSExplorer (Alpha) - 只读 HFS+/HFSX")
         self.setMinimumSize(1024, 768)
         
         # 启用拖放
@@ -852,9 +852,9 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "关于 HFSExplorer",
-            "HFSExplorer 复刻版本\n\n"
-            "一个用于浏览和提取 HFS/HFS+/HFSX 文件系统内容的工具。\n\n"
-            "本软件是原 HFSExplorer 的复刻版本，去除了 Java 依赖。\n"
+            "HFSExplorer (Alpha)\n\n"
+            "只读 HFS+/HFSX 文件系统浏览器。\n\n"
+            "当前状态：Alpha 原型，仅支持基本目录浏览。\n"
             "原作者: Erik Larsson (Catacombae Software)"
         )
     

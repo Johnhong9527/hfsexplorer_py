@@ -191,7 +191,7 @@ class FileInfoPanel(QWidget):
         """设置文件信息"""
         self.name_label.setText(name)
         self.type_label.setText("文件")
-        self.size_label.setText(format_size(file.data_fork_size))
+        self.size_label.setText(format_size(file.get_data_fork_size()))
         self.cnid_label.setText(str(file.file_id))
         
         self.create_date_label.setText(hfs_date_to_string(file.create_date))
@@ -200,9 +200,9 @@ class FileInfoPanel(QWidget):
         self.backup_date_label.setText(hfs_date_to_string(file.backup_date))
         self.attr_mod_date_label.setText(hfs_date_to_string(file.attribute_mod_date))
         
-        self.owner_label.setText(str(file.owner_id))
-        self.group_label.setText(str(file.group_id))
-        self.mode_label.setText(format_mode(file.file_mode))
+        self.owner_label.setText(str(file.get_owner_id()))
+        self.group_label.setText(str(file.get_group_id()))
+        self.mode_label.setText(format_mode(file.get_file_mode()))
     
     def set_folder_info(self, name: str, folder: HFSPlusCatalogFolder):
         """设置文件夹信息"""
@@ -217,9 +217,9 @@ class FileInfoPanel(QWidget):
         self.backup_date_label.setText(hfs_date_to_string(folder.backup_date))
         self.attr_mod_date_label.setText(hfs_date_to_string(folder.attribute_mod_date))
         
-        self.owner_label.setText(str(folder.owner_id))
-        self.group_label.setText(str(folder.group_id))
-        self.mode_label.setText(format_mode(folder.file_mode))
+        self.owner_label.setText(str(folder.get_owner_id()))
+        self.group_label.setText(str(folder.get_group_id()))
+        self.mode_label.setText(format_mode(folder.get_file_mode()))
 
 
 class VolumeInfoPanel(QWidget):

@@ -589,7 +589,7 @@ class HFSPlusCatalogKey:
     变长结构，最大 518 字节。
     
     Attributes:
-        key_length: 键长度（4 + nodeName 字节长度）
+        key_length: 键长度（4 + 2 + nodeName 字节长度）
         parent_id: 父文件夹 CNID
         node_name: 节点名称（UTF-16BE）
     """
@@ -604,17 +604,24 @@ class HFSPlusCatalogKey:
     
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0) -> 'HFSPlusCatalogKey':
-        """从字节序列解析"""
+        """从字节序列解析
+        
+        按 TN1150 规范：
+        - keyLength (UInt16): 包含 parentID(4) + HFSUniStr255(2 + 2*numChars)
+        - parentID (UInt32): 父文件夹 CNID
+        - nodeName (HFSUniStr255): UInt16 length + UInt16[] unicode
+        """
         key_length = struct.unpack_from('>H', data, offset)[0]
         parent_id = struct.unpack_from('>I', data, offset + 2)[0]
         
-        # 计算名称字节长度
-        name_byte_len = key_length - 4
-        if name_byte_len < 0:
-            name_byte_len = 0
+        # HFSUniStr255.length (UInt16) - 字符数量
+        name_length = struct.unpack_from('>H', data, offset + 6)[0]
         
-        # 解析 UTF-16BE 名称
-        raw_name = data[offset + 6:offset + 6 + name_byte_len]
+        # 计算名称字节长度（每个字符 2 字节）
+        name_byte_len = name_length * 2
+        
+        # 解析 UTF-16BE 名称（从 offset + 8 开始）
+        raw_name = data[offset + 8:offset + 8 + name_byte_len]
         node_name = raw_name.decode('utf-16-be') if name_byte_len > 0 else ""
         
         return cls(
@@ -632,7 +639,7 @@ class HFSPlusCatalogFolder:
     """
     HFS+ Catalog 文件夹记录
     
-    88 字节。
+    88 字节。按 TN1150 规范。
     
     Attributes:
         record_type: 记录类型 (0x0001)
@@ -644,11 +651,11 @@ class HFSPlusCatalogFolder:
         attribute_mod_date: 属性修改日期
         access_date: 访问日期
         backup_date: 备份日期
-        owner_id: 所有者 ID
-        group_id: 组 ID
-        admin_flags: 管理员标志
-        owner_flags: 所有者标志
-        file_mode: 文件模式
+        permissions: BSD 权限 (16 字节原始数据)
+        userInfo: Finder userInfo (8 字节)
+        finderInfo: ExtendedFolderInfo (8 字节)
+        text_encoding: 文本编码提示
+        reserved: 保留字段
     """
     record_type: int
     flags: int
@@ -659,15 +666,25 @@ class HFSPlusCatalogFolder:
     attribute_mod_date: int
     access_date: int
     backup_date: int
-    owner_id: int
-    group_id: int
-    admin_flags: int
-    owner_flags: int
-    file_mode: int
+    permissions: bytes  # 16 bytes HFSPlusBSDInfo
+    userInfo: bytes     # 8 bytes FolderInfo
+    finderInfo: bytes   # 8 bytes ExtendedFolderInfo
+    text_encoding: int
+    reserved: int
     
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0) -> 'HFSPlusCatalogFolder':
-        """从字节序列解析"""
+        """从字节序列解析
+        
+        按 TN1150 规范 (88 bytes):
+        SInt16 recordType, UInt16 flags, UInt32 valence, UInt32 folderID,
+        UInt32 createDate, UInt32 contentModDate, UInt32 attributeModDate,
+        UInt32 accessDate, UInt32 backupDate,
+        HFSPlusBSDInfo permissions (16 bytes),
+        FolderInfo userInfo (8 bytes), ExtendedFolderInfo finderInfo (8 bytes),
+        UInt32 textEncoding, UInt32 reserved
+        """
+        # 前 36 字节: recordType(2) + flags(2) + valence(4) + folderID(4) + 5 dates(20)
         (
             record_type,
             flags,
@@ -678,12 +695,17 @@ class HFSPlusCatalogFolder:
             attribute_mod_date,
             access_date,
             backup_date,
-            owner_id,
-            group_id,
-            admin_flags,
-            owner_flags,
-            file_mode
-        ) = struct.unpack_from('>HHI I IIII IIII BBH', data, offset)
+        ) = struct.unpack_from('>HHI I IIII', data, offset)
+        
+        # HFSPlusBSDInfo (16 bytes): ownerID(4) + groupID(4) + adminFlags(1) + ownerFlags(1) + fileMode(2) + special(4)
+        permissions = bytes(data[offset + 36:offset + 52])
+        
+        # FolderInfo (8 bytes) + ExtendedFolderInfo (8 bytes)
+        userInfo = bytes(data[offset + 52:offset + 60])
+        finderInfo = bytes(data[offset + 60:offset + 68])
+        
+        # textEncoding (4 bytes) + reserved (4 bytes)
+        text_encoding, reserved = struct.unpack_from('>II', data, offset + 68)
         
         return cls(
             record_type=record_type,
@@ -695,12 +717,24 @@ class HFSPlusCatalogFolder:
             attribute_mod_date=attribute_mod_date,
             access_date=access_date,
             backup_date=backup_date,
-            owner_id=owner_id,
-            group_id=group_id,
-            admin_flags=admin_flags,
-            owner_flags=owner_flags,
-            file_mode=file_mode
+            permissions=permissions,
+            userInfo=userInfo,
+            finderInfo=finderInfo,
+            text_encoding=text_encoding,
+            reserved=reserved
         )
+    
+    def get_owner_id(self) -> int:
+        """获取所有者 ID"""
+        return struct.unpack_from('>I', self.permissions, 0)[0]
+    
+    def get_group_id(self) -> int:
+        """获取组 ID"""
+        return struct.unpack_from('>I', self.permissions, 4)[0]
+    
+    def get_file_mode(self) -> int:
+        """获取文件模式"""
+        return struct.unpack_from('>H', self.permissions, 10)[0]
 
 
 @dataclass
@@ -708,81 +742,138 @@ class HFSPlusCatalogFile:
     """
     HFS+ Catalog 文件记录
     
-    248 字节。
+    248 字节。按 TN1150 规范。
     
     Attributes:
         record_type: 记录类型 (0x0002)
         flags: 标志
+        reserved1: 保留字段
         file_id: 文件 CNID
         create_date: 创建日期
         content_mod_date: 内容修改日期
         attribute_mod_date: 属性修改日期
         access_date: 访问日期
         backup_date: 备份日期
-        owner_id: 所有者 ID
-        group_id: 组 ID
-        admin_flags: 管理员标志
-        owner_flags: 所有者标志
-        file_mode: 文件模式
-        data_fork_size: 数据分支逻辑大小
-        data_fork_blocks: 数据分支总块数
+        permissions: BSD 权限 (16 字节原始数据)
+        userInfo: Finder userInfo (8 字节)
+        finderInfo: ExtendedFileInfo (8 字节)
+        text_encoding: 文本编码提示
+        reserved2: 保留字段
+        data_fork: 数据分支 (HFSPlusForkData, 80 字节)
+        resource_fork: 资源分支 (HFSPlusForkData, 80 字节)
     """
     record_type: int
     flags: int
+    reserved1: int
     file_id: int
     create_date: int
     content_mod_date: int
     attribute_mod_date: int
     access_date: int
     backup_date: int
-    owner_id: int
-    group_id: int
-    admin_flags: int
-    owner_flags: int
-    file_mode: int
-    data_fork_size: int
-    data_fork_blocks: int
+    permissions: bytes  # 16 bytes HFSPlusBSDInfo
+    userInfo: bytes     # 8 bytes FileInfo
+    finderInfo: bytes   # 8 bytes ExtendedFileInfo
+    text_encoding: int
+    reserved2: int
+    data_fork: bytes    # 80 bytes HFSPlusForkData
+    resource_fork: bytes # 80 bytes HFSPlusForkData
     
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0) -> 'HFSPlusCatalogFile':
-        """从字节序列解析"""
+        """从字节序列解析
+        
+        按 TN1150 规范 (248 bytes):
+        SInt16 recordType, UInt16 flags, UInt32 reserved1, UInt32 fileID,
+        UInt32 createDate, UInt32 contentModDate, UInt32 attributeModDate,
+        UInt32 accessDate, UInt32 backupDate,
+        HFSPlusBSDInfo permissions (16 bytes),
+        FileInfo userInfo (8 bytes), ExtendedFileInfo finderInfo (8 bytes),
+        UInt32 textEncoding, UInt32 reserved2,
+        HFSPlusForkData dataFork (80 bytes), HFSPlusForkData resourceFork (80 bytes)
+        """
+        # 前 40 字节: recordType(2) + flags(2) + reserved1(4) + fileID(4) + 5 dates(20) + padding?
+        # 实际: recordType(2) + flags(2) + reserved1(4) + fileID(4) = 12
+        #       createDate(4) + contentModDate(4) + attributeModDate(4) + accessDate(4) + backupDate(4) = 20
+        # 总计: 32 字节
         (
             record_type,
             flags,
+            reserved1,
             file_id,
             create_date,
             content_mod_date,
             attribute_mod_date,
             access_date,
             backup_date,
-            owner_id,
-            group_id,
-            admin_flags,
-            owner_flags,
-            file_mode
-        ) = struct.unpack_from('>HHI IIII IIII BBH', data, offset)
+        ) = struct.unpack_from('>HHI I IIII', data, offset)
         
-        # 数据分支在偏移 88 处
-        data_fork_size = struct.unpack_from('>Q', data, offset + 88)[0]
-        data_fork_blocks = struct.unpack_from('>I', data, offset + 96)[0]
+        # HFSPlusBSDInfo (16 bytes)
+        permissions = bytes(data[offset + 32:offset + 48])
+        
+        # FileInfo (8 bytes) + ExtendedFileInfo (8 bytes)
+        userInfo = bytes(data[offset + 48:offset + 56])
+        finderInfo = bytes(data[offset + 56:offset + 64])
+        
+        # textEncoding (4 bytes) + reserved2 (4 bytes)
+        text_encoding, reserved2 = struct.unpack_from('>II', data, offset + 64)
+        
+        # HFSPlusForkData dataFork (80 bytes): logicalSize(8) + clumpSize(4) + totalBlocks(4) + extents(64)
+        data_fork = bytes(data[offset + 72:offset + 152])
+        
+        # HFSPlusForkData resourceFork (80 bytes)
+        resource_fork = bytes(data[offset + 152:offset + 232])
         
         return cls(
             record_type=record_type,
             flags=flags,
+            reserved1=reserved1,
             file_id=file_id,
             create_date=create_date,
             content_mod_date=content_mod_date,
             attribute_mod_date=attribute_mod_date,
             access_date=access_date,
             backup_date=backup_date,
-            owner_id=owner_id,
-            group_id=group_id,
-            admin_flags=admin_flags,
-            owner_flags=owner_flags,
-            file_mode=file_mode,
-            data_fork_size=data_fork_size,
-            data_fork_blocks=data_fork_blocks
+            permissions=permissions,
+            userInfo=userInfo,
+            finderInfo=finderInfo,
+            text_encoding=text_encoding,
+            reserved2=reserved2,
+            data_fork=data_fork,
+            resource_fork=resource_fork
         )
+    
+    def get_data_fork_size(self) -> int:
+        """获取数据分支逻辑大小"""
+        return struct.unpack_from('>Q', self.data_fork, 0)[0]
+    
+    def get_data_fork_blocks(self) -> int:
+        """获取数据分支总块数"""
+        return struct.unpack_from('>I', self.data_fork, 12)[0]
+    
+    def get_data_fork_extents(self) -> list:
+        """获取数据分支的 8 个 extent 描述符"""
+        extents = []
+        for i in range(8):
+            start_block, block_count = struct.unpack_from('>II', self.data_fork, 16 + i * 8)
+            extents.append((start_block, block_count))
+        return extents
+    
+    def get_resource_fork_size(self) -> int:
+        """获取资源分支逻辑大小"""
+        return struct.unpack_from('>Q', self.resource_fork, 0)[0]
+    
+    def get_owner_id(self) -> int:
+        """获取所有者 ID"""
+        return struct.unpack_from('>I', self.permissions, 0)[0]
+    
+    def get_group_id(self) -> int:
+        """获取组 ID"""
+        return struct.unpack_from('>I', self.permissions, 4)[0]
+    
+    def get_file_mode(self) -> int:
+        """获取文件模式"""
+        return struct.unpack_from('>H', self.permissions, 10)[0]
 
 
 # =============================================================================
@@ -1058,7 +1149,7 @@ class CatalogBTree(BTreeFile):
                         'type': 'file',
                         'name': key.node_name,
                         'id': file.file_id,
-                        'size': file.data_fork_size,
+                        'size': file.get_data_fork_size(),
                         'create_date': file.create_date,
                         'mod_date': file.content_mod_date,
                     })

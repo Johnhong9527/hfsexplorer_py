@@ -115,25 +115,6 @@ from .search import (
 
 from .writer import (
     WriteError,
-    AllocationBitmap,
-    BTreeWriter,
-    CatalogWriter,
-    FileWriter,
-    VolumeWriter,
-)
-
-from .btree_mutator import (
-    BTreeMutationError,
-    BTreeMutationResult,
-    BTreeMutator,
-    CatalogMutator,
-)
-
-from .file_writer import (
-    WriteResult,
-    FileDataWriter,
-    ExtentWriter,
-    FileWriter,
 )
 
 __all__ = [
@@ -216,23 +197,6 @@ __all__ = [
     'SearchEngine',
     'SearchDialog',
     
-    # 写操作
+    # 写操作 (已禁用 - 写入功能存在数据损坏风险)
     'WriteError',
-    'AllocationBitmap',
-    'BTreeWriter',
-    'CatalogWriter',
-    'FileWriter',
-    'VolumeWriter',
-    
-    # B-tree 变异
-    'BTreeMutationError',
-    'BTreeMutationResult',
-    'BTreeMutator',
-    'CatalogMutator',
-    
-    # 文件写入
-    'WriteResult',
-    'FileDataWriter',
-    'ExtentWriter',
-    'FileWriter',
 ]
