@@ -1,29 +1,40 @@
 """
 设备选择对话框
 
-用于选择物理硬盘设备，支持 USB设备。
+从 Java 版本 HFSExplorer 提炼的功能，支持：
+- Windows 设备检测 (Harddisk0\\Partition0 格式)
+- 自动检测 HFS/HFS+/HFSX 文件系统
+- 嵌套分区系统支持
 """
 
 import os
 import platform
-from typing import Optional, List, Tuple
+import struct
+from typing import Optional, List, Tuple, Dict
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QRadioButton, QLineEdit, QGroupBox,
-    QButtonGroup, QMessageBox, QListWidget, QListWidgetItem
+    QButtonGroup, QMessageBox, QListWidget, QListWidgetItem,
+    QApplication
 )
 from PyQt6.QtCore import Qt
+
+from src.core.partition import parse_partitions, PartitionType
 
 
 class DeviceInfo:
     """设备信息"""
     
-    def __init__(self, path: str, name: str, size: int = 0, model: str = "", is_usb: bool = False):
+    def __init__(self, path: str, name: str, size: int = 0, model: str = "", 
+                 is_usb: bool = False, partition_offset: int = 0,
+                 fs_type: str = ""):
         self.path = path
         self.name = name
         self.size = size
         self.model = model
         self.is_usb = is_usb
+        self.partition_offset = partition_offset
+        self.fs_type = fs_type  # HFS, HFS+, HFSX
     
     @property
     def size_str(self) -> str:
@@ -41,9 +52,36 @@ class DeviceInfo:
     
     def __str__(self) -> str:
         usb_marker = " [USB]" if self.is_usb else ""
+        fs_marker = f" [{self.fs_type}]" if self.fs_type else ""
         if self.model:
-            return f"{self.name}{usb_marker} - {self.model} ({self.size_str})"
-        return f"{self.name}{usb_marker} ({self.size_str})"
+            return f"{self.name}{usb_marker}{fs_marker} - {self.model} ({self.size_str})"
+        return f"{self.name}{usb_marker}{fs_marker} ({self.size_str})"
+
+
+def detect_filesystem_type(data: bytes, offset: int = 0) -> str:
+    """
+    检测文件系统类型
+    
+    Args:
+        data: 扇区数据
+        offset: 偏移量
+    
+    Returns:
+        文件系统类型: "HFS", "HFS+", "HFSX", 或 ""
+    """
+    if len(data) < offset + 2:
+        return ""
+    
+    signature = struct.unpack_from('>H', data, offset)[0]
+    
+    if signature == 0x4244:  # 'BD'
+        return "HFS"
+    elif signature == 0x482B:  # 'H+'
+        return "HFS+"
+    elif signature == 0x4858:  # 'HX'
+        return "HFSX"
+    
+    return ""
 
 
 def detect_devices() -> List[DeviceInfo]:
@@ -56,126 +94,225 @@ def detect_devices() -> List[DeviceInfo]:
     devices = []
     system = platform.system()
     
-    if system == "Linux":
+    if system == "Windows":
+        # Windows: 检测 Harddisk0\\Partition0, Harddisk0\Partition1, ...
+        # 这是 Java 版本的检测方式
+        devices.extend(_detect_windows_devices())
+    elif system == "Linux":
         # Linux: 检查 /dev/sd*, /dev/nvme*, /dev/vd* 等
-        dev_paths = []
+        devices.extend(_detect_linux_devices())
+    elif system == "Darwin":
+        # macOS: 检查 /dev/disk0, 1, 2...
+        devices.extend(_detect_macos_devices())
+    
+    return devices
+
+
+def _detect_windows_devices() -> List[DeviceInfo]:
+    """
+    检测 Windows 设备
+    
+    使用 Java 版本的检测方式：Harddisk0\\Partition0, Harddisk1\Partition0, ...
+    """
+    devices = []
+    
+    # 检测硬盘和分区 (最多20个硬盘，每个最多20个分区)
+    for i in range(20):
+        any_found = False
+        for j in range(20):
+            device_name = f"Harddisk{i}\\Partition{j}"
+            device_path = f"\\\\.\\PhysicalDrive{i}" if j == 0 else f"\\\\.\\{device_name}"
+            
+            # 尝试打开设备
+            try:
+                with open(device_path, 'rb') as f:
+                    # 读取第一个扇区
+                    data = f.read(512)
+                    if len(data) >= 512:
+                        any_found = True
+                        
+                        # 检测是否是 HFS+ 分区
+                        fs_type = detect_filesystem_type(data)
+                        
+                        if j == 0:
+                            # 整盘
+                            devices.append(DeviceInfo(
+                                device_path,
+                                device_name,
+                                0,
+                                "",
+                                False,
+                                0,
+                                fs_type
+                            ))
+                        else:
+                            # 分区
+                            devices.append(DeviceInfo(
+                                device_path,
+                                device_name,
+                                0,
+                                "",
+                                False,
+                                0,
+                                fs_type
+                            ))
+            except (PermissionError, OSError, Exception):
+                # 无法访问，跳过
+                if j == 0 and not any_found:
+                    break
+                if j >= 1:
+                    break
         
-        # SCSI/SATA/USB 设备及其分区
-        for i in range(26):
-            dev_base = f"sd{chr(97 + i)}"
-            dev_path = f"/dev/{dev_base}"
-            if os.path.exists(dev_path):
-                dev_paths.append(dev_path)
-                # 检测分区
-                for j in range(1, 20):
-                    part_path = f"/dev/{dev_base}{j}"
-                    if os.path.exists(part_path):
-                        dev_paths.append(part_path)
-        
-        # NVMe 设备及其分区
-        for i in range(10):
-            for j in range(10):
-                dev_base = f"nvme{i}n{j}"
-                dev_path = f"/dev/{dev_base}"
-                if os.path.exists(dev_path):
-                    dev_paths.append(dev_path)
-                    # 检测分区
-                    for k in range(1, 20):
-                        part_path = f"/dev/{dev_base}p{k}"
-                        if os.path.exists(part_path):
-                            dev_paths.append(part_path)
-        
-        # 虚拟设备及其分区
-        for i in range(26):
-            dev_base = f"vd{chr(97 + i)}"
-            dev_path = f"/dev/{dev_base}"
-            if os.path.exists(dev_path):
-                dev_paths.append(dev_path)
-                for j in range(1, 20):
-                    part_path = f"/dev/{dev_base}{j}"
-                    if os.path.exists(part_path):
-                        dev_paths.append(part_path)
-        
-        # 获取设备信息
-        for dev_path in dev_paths:
-            name = os.path.basename(dev_path)
+        if not any_found and i >= 5:
+            break
+    
+    # 也尝试使用 wmic 获取更多信息
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['wmic', 'diskdrive', 'get', 'DeviceID,Size,Model,InterfaceType'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')[1:]
+            for line in lines:
+                if not line.strip():
+                    continue
+                
+                # 解析设备信息
+                device_id = None
+                model = ''
+                size = 0
+                is_usb = False
+                
+                parts = line.split()
+                for j, part in enumerate(parts):
+                    if 'PhysicalDrive' in part:
+                        device_id = part
+                    elif part.isdigit() and int(part) > 1000000:
+                        size = int(part)
+                
+                if device_id:
+                    # 检查是否是 USB
+                    is_usb = 'USB' in line.upper() or 'EXTERNAL' in line.upper()
+                    
+                    # 获取型号
+                    model_parts = [p for p in parts if not p.isdigit() and 'PhysicalDrive' not in p]
+                    model = ' '.join(model_parts) if model_parts else ''
+                    
+                    # 更新设备信息
+                    for dev in devices:
+                        if dev.path == device_id or dev.path.endswith(device_id.split('\\')[-1]):
+                            dev.size = size
+                            dev.model = model
+                            dev.is_usb = is_usb
+    except Exception:
+        pass
+    
+    return devices
+
+
+def _detect_linux_devices() -> List[DeviceInfo]:
+    """检测 Linux 设备"""
+    devices = []
+    
+    # SCSI/SATA/USB 设备及其分区
+    for i in range(26):
+        dev_base = f"sd{chr(97 + i)}"
+        dev_path = f"/dev/{dev_base}"
+        if os.path.exists(dev_path):
+            # 检测整盘
             size = _get_device_size_linux(dev_path)
             model = _get_device_model_linux(dev_path)
             is_usb = _is_removable_device(dev_path)
-            # 检查权限
-            readable = os.access(dev_path, os.R_OK)
-            if not readable:
-                name += " (需要root权限)"
-            devices.append(DeviceInfo(dev_path, name, size, model, is_usb))
+            
+            # 检测文件系统类型
+            fs_type = ""
+            try:
+                with open(dev_path, 'rb') as f:
+                    data = f.read(512)
+                    fs_type = detect_filesystem_type(data)
+            except:
+                pass
+            
+            devices.append(DeviceInfo(dev_path, dev_base, size, model, is_usb, 0, fs_type))
+            
+            # 检测分区
+            for j in range(1, 20):
+                part_path = f"/dev/{dev_base}{j}"
+                if os.path.exists(part_path):
+                    part_size = _get_device_size_linux(part_path)
+                    part_fs = ""
+                    try:
+                        with open(part_path, 'rb') as f:
+                            data = f.read(512)
+                            part_fs = detect_filesystem_type(data)
+                    except:
+                        pass
+                    
+                    devices.append(DeviceInfo(
+                        part_path, f"{dev_base}{j}", part_size, model, is_usb, 0, part_fs
+                    ))
     
-    elif system == "Windows":
-        # Windows: 使用 wmic 获取磁盘信息
-        try:
-            import subprocess
-            result = subprocess.run(
-                ['wmic', 'diskdrive', 'get', 'DeviceID,Size,Model,MediaType,InterfaceType'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')[1:]  # 跳过标题行
-                for line in lines:
-                    if not line.strip():
-                        continue
-                    # 解析字段
-                    device_id = None
-                    model = ''
-                    size = 0
-                    is_usb = False
-                    
-                    # 查找设备ID (\\.\PhysicalDriveN)
-                    if '\\\\' in line or 'PhysicalDrive' in line:
-                        parts = line.split()
-                        for j, part in enumerate(parts):
-                            if 'PhysicalDrive' in part or part.startswith('\\\\'):
-                                device_id = part
-                                break
-                    
-                    if not device_id:
-                        # 尝试另一种解析方式
-                        if 'PhysicalDrive' in line:
-                            idx = line.find('PhysicalDrive')
-                            device_id = '\\\\.\\' + line[idx:idx+16].split()[0]
-                    
-                    if device_id:
-                        # 查找大小
-                        for part in line.split():
-                            if part.isdigit() and int(part) > 1000000:
-                                size = int(part)
-                                break
-                        
-                        # 检查是否是 USB
-                        is_usb = 'USB' in line.upper() or 'EXTERNAL' in line.upper() or 'REMOVABLE' in line.upper()
-                        
-                        # 获取型号
-                        model_start = line.find('PhysicalDrive')
-                        if model_start > 0:
-                            model_part = line[model_start:]
-                            parts = model_part.split()
-                            if len(parts) > 1:
-                                model = ' '.join(parts[1:-1]) if len(parts) > 2 else parts[1]
-                        
-                        name = device_id.split('\\')[-1] if '\\' in device_id else device_id
-                        devices.append(DeviceInfo(device_id, name, size, model, is_usb))
-        except Exception as e:
-            # 备用方案：直接添加 PhysicalDrive
-            for i in range(10):
-                dev_path = f"\\\\.\\PhysicalDrive{i}"
-                name = f"PhysicalDrive{i}"
-                devices.append(DeviceInfo(dev_path, name))
-    
-    elif system == "Darwin":
-        # macOS: 检查 /dev/disk0, 1, 2...
-        for i in range(20):
-            dev_path = f"/dev/disk{i}"
+    # NVMe 设备及其分区
+    for i in range(10):
+        for j in range(10):
+            dev_base = f"nvme{i}n{j}"
+            dev_path = f"/dev/{dev_base}"
             if os.path.exists(dev_path):
-                name = f"disk{i}"
                 size = _get_device_size_linux(dev_path)
-                devices.append(DeviceInfo(dev_path, name, size))
+                model = _get_device_model_linux(dev_path)
+                is_usb = False  # NVMe 通常不是 USB
+                
+                fs_type = ""
+                try:
+                    with open(dev_path, 'rb') as f:
+                        data = f.read(512)
+                        fs_type = detect_filesystem_type(data)
+                except:
+                    pass
+                
+                devices.append(DeviceInfo(dev_path, dev_base, size, model, is_usb, 0, fs_type))
+                
+                # 检测分区
+                for k in range(1, 20):
+                    part_path = f"/dev/{dev_base}p{k}"
+                    if os.path.exists(part_path):
+                        part_size = _get_device_size_linux(part_path)
+                        part_fs = ""
+                        try:
+                            with open(part_path, 'rb') as f:
+                                data = f.read(512)
+                                part_fs = detect_filesystem_type(data)
+                        except:
+                            pass
+                        
+                        devices.append(DeviceInfo(
+                            part_path, f"{dev_base}p{k}", part_size, model, False, 0, part_fs
+                        ))
+    
+    return devices
+
+
+def _detect_macos_devices() -> List[DeviceInfo]:
+    """检测 macOS 设备"""
+    devices = []
+    
+    for i in range(20):
+        dev_path = f"/dev/disk{i}"
+        if os.path.exists(dev_path):
+            name = f"disk{i}"
+            size = _get_device_size_linux(dev_path)
+            
+            fs_type = ""
+            try:
+                with open(dev_path, 'rb') as f:
+                    data = f.read(512)
+                    fs_type = detect_filesystem_type(data)
+            except:
+                pass
+            
+            devices.append(DeviceInfo(dev_path, name, size, "", False, 0, fs_type))
     
     return devices
 
@@ -233,20 +370,22 @@ class DeviceSelectionDialog(QDialog):
     """
     设备选择对话框
     
-    用于选择物理硬盘设备。
+    从 Java 版本 HFSExplorer 提炼的功能。
     
     Usage:
         dialog = DeviceSelectionDialog(parent)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             device_path = dialog.get_selected_device()
+            partition_offset = dialog.get_partition_offset()
     """
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("选择设备")
-        self.setMinimumWidth(500)
+        self.setWindowTitle("加载文件系统从设备")
+        self.setMinimumWidth(550)
         
         self._selected_device: Optional[str] = None
+        self._partition_offset: int = 0
         self._devices: List[DeviceInfo] = []
         
         self._setup_ui()
@@ -282,9 +421,9 @@ class DeviceSelectionDialog(QDialog):
         device_layout.addWidget(self.auto_radio)
         
         # 设备列表
-        self.device_list = QListWidget()
-        self.device_list.setMinimumHeight(150)
-        device_layout.addWidget(self.device_list)
+        self.device_combo = QComboBox()
+        self.device_combo.setMinimumHeight(30)
+        device_layout.addWidget(self.device_combo)
         
         # 警告标签
         warning_label = QLabel("(混合 CD-ROM 同时包含 HFS/+/X 和 ISO 文件系统将无法工作)")
@@ -315,6 +454,16 @@ class DeviceSelectionDialog(QDialog):
         self.path_edit.setEnabled(False)
         manual_layout.addWidget(self.path_edit)
         device_layout.addLayout(manual_layout)
+        
+        # 示例标签
+        system = platform.system()
+        if system == "Windows":
+            example = "示例: \\\\.\\GLOBALROOT\\Device\\Harddisk0\\Partition1"
+        else:
+            example = "示例: /dev/sda1"
+        example_label = QLabel(example)
+        example_label.setStyleSheet("color: gray;")
+        device_layout.addWidget(example_label)
         
         # 单选按钮组
         self.radio_group = QButtonGroup()
@@ -349,22 +498,23 @@ class DeviceSelectionDialog(QDialog):
     
     def _detect_devices(self):
         """检测设备"""
-        self.device_list.clear()
+        self.device_combo.clear()
         self._devices = detect_devices()
         
         for device in self._devices:
-            item = QListWidgetItem(str(device))
-            item.setData(Qt.ItemDataRole.UserRole, device)
-            self.device_list.addItem(item)
+            self.device_combo.addItem(str(device), device)
         
         if self._devices:
-            self.device_list.setCurrentRow(0)
+            self.device_combo.setCurrentIndex(0)
+    
+    def _on_radio_changed(self, checked: bool):
+        """单选按钮状态改变"""
+        self.device_combo.setEnabled(checked)
+        self.path_edit.setEnabled(not checked)
     
     def _autodetect_hfs(self):
         """自动检测 HFS/HFS+/HFSX 分区"""
-        from src.core.partition import parse_partitions
-        
-        self.device_list.clear()
+        self.device_combo.clear()
         self._devices = []
         
         # 检测所有设备
@@ -379,7 +529,7 @@ class DeviceSelectionDialog(QDialog):
         
         for device in all_devices:
             # 跳过分区，只扫描整盘
-            if device.path[-1].isdigit():
+            if device.path[-1].isdigit() and 'Partition' not in device.name:
                 continue
             
             try:
@@ -392,22 +542,42 @@ class DeviceSelectionDialog(QDialog):
                     if partitions:
                         for p in partitions:
                             if p.is_hfs:
-                                # 创建一个新的设备信息
-                                hfs_path = device.path
-                                # 计算分区偏移
-                                offset_mb = p.start_offset / (1024 * 1024)
-                                size_gb = p.size_bytes / (1024 * 1024 * 1024)
+                                # 检测文件系统类型
+                                f.seek(p.start_offset)
+                                data = f.read(512)
+                                fs_type = detect_filesystem_type(data)
                                 
-                                name = f"{device.name} - {p.name} ({size_gb:.2f} GB, 偏移: {offset_mb:.1f} MB)"
-                                hfs_info = DeviceInfo(
-                                    device.path,
-                                    name,
-                                    p.size_bytes,
-                                    device.model,
-                                    device.is_usb
-                                )
-                                hfs_info.partition_offset = p.start_offset  # 保存分区偏移
-                                hfs_devices.append(hfs_info)
+                                if fs_type:
+                                    size_gb = p.size_bytes / (1024 * 1024 * 1024)
+                                    name = f"{device.name} - {p.name} ({fs_type}, {size_gb:.2f} GB)"
+                                    
+                                    hfs_info = DeviceInfo(
+                                        device.path,
+                                        name,
+                                        p.size_bytes,
+                                        device.model,
+                                        device.is_usb,
+                                        p.start_offset,
+                                        fs_type
+                                    )
+                                    hfs_devices.append(hfs_info)
+                    
+                    # 也检查整个设备是否是 HFS+
+                    if not partitions:
+                        f.seek(0)
+                        data = f.read(512)
+                        fs_type = detect_filesystem_type(data)
+                        if fs_type:
+                            hfs_info = DeviceInfo(
+                                device.path,
+                                f"{device.name} ({fs_type})",
+                                device.size,
+                                device.model,
+                                device.is_usb,
+                                0,
+                                fs_type
+                            )
+                            hfs_devices.append(hfs_info)
             except Exception as e:
                 # 忽略无法访问的设备
                 pass
@@ -417,7 +587,7 @@ class DeviceSelectionDialog(QDialog):
         if not hfs_devices:
             QMessageBox.information(
                 self, "自动检测",
-                "未检测到 HFS/HFS+/HFSX 分区。\n\n"
+                "未检测到 HFS/HFS+/HFSX 文件系统。\n\n"
                 "可能的原因：\n"
                 "1. 没有连接 HFS+ 格式的硬盘\n"
                 "2. 需要管理员权限才能访问设备\n"
@@ -428,37 +598,27 @@ class DeviceSelectionDialog(QDialog):
         # 添加到列表
         self._devices = hfs_devices
         for device in hfs_devices:
-            item = QListWidgetItem(str(device))
-            item.setData(Qt.ItemDataRole.UserRole, device)
-            self.device_list.addItem(item)
+            self.device_combo.addItem(str(device), device)
         
-        self.device_list.setCurrentRow(0)
+        self.device_combo.setCurrentIndex(0)
         QMessageBox.information(
             self, "自动检测",
-            f"检测到 {len(hfs_devices)} 个 HFS+ 分区"
+            f"自动检测完成！找到 {len(hfs_devices)} 个 HFS+ 文件系统。\n"
+            "请选择要加载的文件系统："
         )
-    
-    def _on_radio_changed(self, checked: bool):
-        """单选按钮状态改变"""
-        self.device_list.setEnabled(checked)
-        self.path_edit.setEnabled(not checked)
     
     def _on_load(self):
         """加载按钮点击"""
         if self.auto_radio.isChecked():
             # 从列表中选择
-            current_item = self.device_list.currentItem()
-            if current_item is None:
+            current_index = self.device_combo.currentIndex()
+            if current_index < 0:
                 QMessageBox.warning(self, "警告", "请选择一个设备")
                 return
             
-            device = current_item.data(Qt.ItemDataRole.UserRole)
+            device = self._devices[current_index]
             self._selected_device = device.path
-            # 保存分区偏移（如果有）
-            if hasattr(device, 'partition_offset'):
-                self._partition_offset = device.partition_offset
-            else:
-                self._partition_offset = 0
+            self._partition_offset = device.partition_offset
         else:
             # 手动输入
             path = self.path_edit.text().strip()
@@ -481,10 +641,10 @@ class DeviceSelectionDialog(QDialog):
     
     def get_partition_offset(self) -> int:
         """获取分区偏移"""
-        return getattr(self, '_partition_offset', 0)
+        return self._partition_offset
 
 
-def show_device_selection_dialog(parent=None) -> Optional[str]:
+def show_device_selection_dialog(parent=None) -> Optional[Tuple[str, int]]:
     """
     显示设备选择对话框的便捷函数
     
@@ -492,9 +652,9 @@ def show_device_selection_dialog(parent=None) -> Optional[str]:
         parent: 父窗口
     
     Returns:
-        选中的设备路径，如果取消则返回 None
+        (设备路径, 分区偏移) 元组，如果取消则返回 None
     """
     dialog = DeviceSelectionDialog(parent)
     if dialog.exec() == QDialog.DialogCode.Accepted:
-        return dialog.get_selected_device()
+        return dialog.get_selected_device(), dialog.get_partition_offset()
     return None
