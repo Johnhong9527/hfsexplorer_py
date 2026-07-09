@@ -494,7 +494,47 @@ class MainWindow(QMainWindow):
                         )
                         return
                 
-                self._load_filesystem(device_path)
+                # 检测设备上的分区
+                try:
+                    with open(device_path, 'rb') as f:
+                        partition_type, partitions = parse_partitions(f)
+                        
+                        if not partitions:
+                            QMessageBox.warning(self, "警告", "未检测到分区表")
+                            return
+                        
+                        # 查找 HFS+ 分区
+                        hfs_partitions = [p for p in partitions if p.is_hfs]
+                        
+                        if not hfs_partitions:
+                            # 显示所有分区信息
+                            info = f"设备: {device_path}\n"
+                            info += f"分区表类型: {partition_type.name}\n\n"
+                            info += "检测到的分区:\n"
+                            for p in partitions:
+                                info += f"  - {p.name} ({p.type_name}, {p.size_bytes / (1024**3):.2f} GB)\n"
+                            info += "\n未找到 HFS+ 分区"
+                            QMessageBox.information(self, "分区信息", info)
+                            return
+                        
+                        if len(hfs_partitions) == 1:
+                            # 只有一个 HFS+ 分区，直接使用
+                            self._load_filesystem_with_offset(device_path, hfs_partitions[0].start_offset)
+                        else:
+                            # 多个 HFS+ 分区，让用户选择
+                            items = [f"{p.name} ({p.type_name}, {p.size_bytes / (1024**3):.2f} GB)" for p in hfs_partitions]
+                            item, ok = QInputDialog.getItem(
+                                self, "选择分区",
+                                f"检测到 {partition_type.name} 分区表，请选择要打开的 HFS+ 分区:",
+                                items, 0, False
+                            )
+                            
+                            if ok and item:
+                                idx = items.index(item)
+                                selected_partition = hfs_partitions[idx]
+                                self._load_filesystem_with_offset(device_path, selected_partition.start_offset)
+                except Exception as e:
+                    QMessageBox.critical(self, "错误", f"解析分区表失败: {e}")
     
     def _load_filesystem(self, path: str):
         """加载文件系统"""
