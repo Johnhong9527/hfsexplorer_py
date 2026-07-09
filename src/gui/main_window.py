@@ -190,6 +190,11 @@ class MainWindow(QMainWindow):
         # 当前查看的文件夹 ID
         self.current_folder_id: int = 2  # 根目录
         
+        # 最近打开的文件
+        self.recent_files: List[str] = []
+        self.max_recent_files = 10
+        self._load_recent_files()
+        
         # 初始化 UI
         self._setup_menus()
         self._setup_toolbar()
@@ -243,6 +248,12 @@ class MainWindow(QMainWindow):
         
         file_menu.addSeparator()
         
+        # 最近文件子菜单
+        self.recent_menu = file_menu.addMenu("最近打开(&R)")
+        self._update_recent_menu()
+        
+        file_menu.addSeparator()
+        
         exit_action = QAction("退出(&X)", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
@@ -283,6 +294,14 @@ class MainWindow(QMainWindow):
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self._show_volume_info)
         tools_menu.addAction(info_action)
+        
+        tools_menu.addSeparator()
+        
+        # 预览功能
+        preview_action = QAction("预览文件(&P)", self)
+        preview_action.setShortcut("Space")
+        preview_action.triggered.connect(self._preview_file)
+        tools_menu.addAction(preview_action)
         
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
@@ -630,6 +649,9 @@ class MainWindow(QMainWindow):
         
         # 更新信息面板
         self.info_panel.set_volume_header(self.current_header)
+        
+        # 添加到最近文件
+        self._add_recent_file(self.current_path)
         
         # 加载目录树
         self._load_directory_tree()
@@ -988,6 +1010,10 @@ class MainWindow(QMainWindow):
         if selected_item_data and selected_item_data['type'] == 'file':
             extract_action = menu.addAction("提取...")
             extract_action.triggered.connect(self._extract_selected)
+            
+            # 预览（仅文件）
+            preview_action = menu.addAction("预览")
+            preview_action.triggered.connect(self._preview_file)
         
         if has_selection:
             menu.addSeparator()
@@ -1728,6 +1754,142 @@ class MainWindow(QMainWindow):
             self._load_filesystem(files[0])
         
         event.acceptProposedAction()
+    
+    def _load_recent_files(self):
+        """加载最近打开的文件列表"""
+        import json
+        try:
+            config_dir = os.path.expanduser('~/.config/hfsexplorer')
+            config_file = os.path.join(config_dir, 'recent.json')
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    self.recent_files = json.load(f)
+        except Exception:
+            self.recent_files = []
+    
+    def _save_recent_files(self):
+        """保存最近打开的文件列表"""
+        import json
+        try:
+            config_dir = os.path.expanduser('~/.config/hfsexplorer')
+            os.makedirs(config_dir, exist_ok=True)
+            config_file = os.path.join(config_dir, 'recent.json')
+            with open(config_file, 'w') as f:
+                json.dump(self.recent_files, f)
+        except Exception:
+            pass
+    
+    def _add_recent_file(self, path: str):
+        """添加到最近文件列表"""
+        # 移除已存在的项
+        if path in self.recent_files:
+            self.recent_files.remove(path)
+        
+        # 添加到开头
+        self.recent_files.insert(0, path)
+        
+        # 限制数量
+        if len(self.recent_files) > self.max_recent_files:
+            self.recent_files = self.recent_files[:self.max_recent_files]
+        
+        # 保存
+        self._save_recent_files()
+        
+        # 更新菜单
+        self._update_recent_menu()
+    
+    def _update_recent_menu(self):
+        """更新最近文件菜单"""
+        if hasattr(self, 'recent_menu'):
+            self.recent_menu.clear()
+            for path in self.recent_files:
+                action = QAction(os.path.basename(path), self)
+                action.setToolTip(path)
+                action.triggered.connect(lambda checked, p=path: self._load_filesystem(p))
+                self.recent_menu.addAction(action)
+            
+            if not self.recent_files:
+                action = QAction("(无最近文件)", self)
+                action.setEnabled(False)
+                self.recent_menu.addAction(action)
+    
+    def _preview_file(self):
+        """预览当前选中的文件"""
+        if not self.current_catalog or not self.view_manager:
+            return
+        
+        # 获取选中的项目
+        selected = self.view_manager.get_selected_items()
+        if not selected:
+            return
+        
+        item_data = selected[0]
+        if item_data.get('type') != 'file':
+            return
+        
+        file_id = item_data.get('id')
+        file_name = item_data.get('name', '')
+        
+        # 读取文件内容
+        try:
+            if self.volume is None:
+                self.volume = HFSPlusVolume(self.current_path)
+            
+            data = self.volume.read_file(file_id)
+            
+            # 检查文件类型
+            text_extensions = {
+                '.txt', '.py', '.js', '.html', '.css', '.json', '.xml',
+                '.md', '.yml', '.yaml', '.toml', '.ini', '.cfg',
+                '.sh', '.bash', '.zsh', '.fish', '.bat', '.cmd',
+                '.c', '.cpp', '.h', '.hpp', '.java', '.rs', '.go',
+                '.rb', '.php', '.pl', '.swift', '.kt', '.scala',
+                '.r', '.m', '.mm', '.sql', '.csv', '.tsv',
+            }
+            
+            _, ext = os.path.splitext(file_name.lower())
+            
+            if ext in text_extensions:
+                # 文本文件预览
+                try:
+                    text_content = data.decode('utf-8', errors='replace')
+                except:
+                    text_content = data.decode('latin-1', errors='replace')
+                
+                # 限制预览大小
+                if len(text_content) > 50000:
+                    text_content = text_content[:50000] + "\n\n... (文件太大，仅显示前 50000 个字符)"
+                
+                from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+                from PyQt6.QtGui import QFont
+                
+                dialog = QDialog(self)
+                dialog.setWindowTitle(f"预览 - {file_name}")
+                dialog.setMinimumSize(600, 400)
+                
+                layout = QVBoxLayout(dialog)
+                
+                text_edit = QTextEdit()
+                text_edit.setPlainText(text_content)
+                text_edit.setReadOnly(True)
+                text_edit.setFont(QFont("Monospace", 10))
+                layout.addWidget(text_edit)
+                
+                close_button = QPushButton("关闭")
+                close_button.clicked.connect(dialog.close)
+                layout.addWidget(close_button)
+                
+                dialog.exec()
+            else:
+                # 非文本文件
+                QMessageBox.information(
+                    self, "预览",
+                    f"文件: {file_name}\n"
+                    f"大小: {format_size(len(data))}\n\n"
+                    f"此文件类型不支持预览。"
+                )
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"无法预览文件: {e}")
     
     def closeEvent(self, event):
         """关闭窗口事件"""
