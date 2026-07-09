@@ -27,6 +27,7 @@ from src.core.hfs import (
     read_volume_header,
     is_hfs_plus_volume,
     HFSPlusVolumeHeader,
+    HFSPlusVolume,
     CatalogBTree,
     CatalogRecordType,
     HFSPlusCatalogKey,
@@ -64,33 +65,24 @@ class FileLoadThread(QThread):
     
     def run(self):
         try:
-            # 读取卷头
-            header = read_volume_header(self.file_path)
-            
-            # 尝试打开 Catalog B-tree
-            catalog = None
-            try:
-                with open(self.file_path, 'rb') as f:
-                    # Catalog 文件在卷头的 catalog_file 字段中
-                    # 简化实现：假设 Catalog 从卷的某个位置开始
-                    # 实际需要解析 extent 来找到 Catalog 的位置
-                    pass
-            except Exception:
-                pass
-            
-            result = {
-                'path': self.file_path,
-                'header': header,
-                'catalog': catalog,
-                'signature': 'HFS+' if header.is_hfs_plus else 'HFSX',
-                'block_size': header.block_size,
-                'total_blocks': header.total_blocks,
-                'free_blocks': header.free_blocks,
-                'file_count': header.file_count,
-                'folder_count': header.folder_count,
-            }
-            
-            self.finished.emit(result)
+            # 使用 HFSPlusVolume 统一加载
+            with HFSPlusVolume(self.file_path) as vol:
+                header = vol.header
+                info = vol.get_info()
+                
+                result = {
+                    'path': self.file_path,
+                    'header': header,
+                    'volume': vol,
+                    'signature': info['signature'],
+                    'block_size': info['block_size'],
+                    'total_blocks': info['total_blocks'],
+                    'free_blocks': info['free_blocks'],
+                    'file_count': info['file_count'],
+                    'folder_count': info['folder_count'],
+                }
+                
+                self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -101,20 +93,16 @@ class FolderLoadThread(QThread):
     finished = pyqtSignal(int, list)
     error = pyqtSignal(str)
     
-    def __init__(self, file_path: str, parent_id: int, 
-                 catalog_offset: int = 0, node_size: int = 4096):
+    def __init__(self, file_path: str, parent_id: int):
         super().__init__()
         self.file_path = file_path
         self.parent_id = parent_id
-        self.catalog_offset = catalog_offset
-        self.node_size = node_size
     
     def run(self):
         try:
-            # 打开文件并读取 Catalog B-tree
-            with open(self.file_path, 'rb') as f:
-                catalog = CatalogBTree(f, self.catalog_offset, self.node_size)
-                contents = catalog.list_folder_contents(self.parent_id)
+            # 使用 HFSPlusVolume 加载文件夹内容
+            with HFSPlusVolume(self.file_path) as vol:
+                contents = vol.list_folder(self.parent_id)
                 self.finished.emit(self.parent_id, contents)
         except Exception as e:
             self.error.emit(str(e))
@@ -535,9 +523,7 @@ class MainWindow(QMainWindow):
         if self.current_path is None:
             return
         
-        self.folder_thread = FolderLoadThread(
-            self.current_path, parent_id, self.catalog_offset, self.node_size
-        )
+        self.folder_thread = FolderLoadThread(self.current_path, parent_id)
         self.folder_thread.finished.connect(self._on_folder_loaded)
         self.folder_thread.error.connect(self._on_folder_error)
         self.folder_thread.start()

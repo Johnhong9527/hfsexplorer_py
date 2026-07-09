@@ -19,6 +19,8 @@ from .btree import (
     HFSPlusExtentKey,
     HFSPlusExtentRecord,
     HFSPlusExtentDescriptor,
+    HFSPlusFileReader,
+    ForkType,
     BTreeFile,
 )
 from .constants import HFS_EPOCH_OFFSET
@@ -58,6 +60,18 @@ class FileExtractor:
         self.catalog = catalog
         self.extents = extents
         self.block_size = block_size
+        self._file_reader: Optional[HFSPlusFileReader] = None
+    
+    @property
+    def file_reader(self) -> HFSPlusFileReader:
+        """获取文件读取器"""
+        if self._file_reader is None:
+            if self.extents is None:
+                raise ExtractionError("Extents B-tree 未初始化")
+            self._file_reader = HFSPlusFileReader(
+                self.stream, self.catalog, self.extents, self.block_size
+            )
+        return self._file_reader
     
     def extract_file(self, file_id: int, output_path: str,
                      overwrite: bool = False) -> bool:
@@ -167,18 +181,11 @@ class FileExtractor:
         if file_size == 0:
             return b''
         
-        # 读取数据分支
-        # 注意：这里简化了实现，实际需要处理 extent 溢出
-        # 目前只支持读取内联数据（存储在 catalog 记录中的数据）
-        
-        # 读取数据
-        data = b''
-        
-        # 遍历 extent
-        # 注意：这里需要实现完整的 extent 读取逻辑
-        # 目前只是一个框架
-        
-        return data
+        # 使用 HFSPlusFileReader 读取数据（支持初始 extents + overflow extents）
+        try:
+            return self.file_reader.read_data_fork(file_record.file_id)
+        except Exception as e:
+            raise ExtractionError(f"读取文件数据失败: {e}")
     
     def get_file_info(self, file_id: int) -> Optional[dict]:
         """

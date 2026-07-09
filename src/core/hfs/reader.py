@@ -317,29 +317,31 @@ class HFSPlusVolume:
         h = self.header
         
         # Catalog B-tree
-        # catalogFile 是一个 ForkData，第一个 extent 描述了 B-tree 的位置
-        catalog_extents = h.catalog_extents
+        # catalog_file 是 ForkData，其 extents 描述了 B-tree 的位置
+        catalog_extents = h.catalog_file.extents
         if catalog_extents and catalog_extents[0].block_count > 0:
             catalog_start = self._volume_offset + catalog_extents[0].start_block * h.block_size
+            # CatalogBTree 会从 B-tree 头记录读取 node_size
             self._catalog = CatalogBTree(
                 self._file,
                 start_offset=catalog_start,
-                node_size=h.catalog_node_size
+                node_size=4096  # 默认值，会被 B-tree 头记录覆盖
             )
         else:
             raise IOError("Catalog B-tree 位置无效")
         
         # Extents B-tree
-        extents_extents = h.extents_extents
+        extents_extents = h.extents_file.extents
         if extents_extents and extents_extents[0].block_count > 0:
             extents_start = self._volume_offset + extents_extents[0].start_block * h.block_size
+            # ExtentsBTree 会从 B-tree 头记录读取 node_size
             self._extents = ExtentsBTree(
                 self._file,
                 start_offset=extents_start,
-                node_size=h.extents_node_size
+                node_size=4096  # 默认值，会被 B-tree 头记录覆盖
             )
         else:
-            # Extents B-tree 可能为空（小卷）
+            # Extents B-tree 可能为空（小卷没有 overflow extents）
             self._extents = ExtentsBTree(
                 self._file,
                 start_offset=0,

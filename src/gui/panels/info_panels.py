@@ -315,7 +315,7 @@ class VolumeInfoPanel(QWidget):
         self.stats_layout.addRow("文件数:", self.file_count_label)
         self.stats_layout.addRow("文件夹数:", self.folder_count_label)
         self.stats_layout.addRow("下一个 CNID:", self.next_catalog_id_label)
-        self.stats_layout.writerow("写入计数:", self.write_count_label)
+        self.stats_layout.addRow("写入计数:", self.write_count_label)
         
         # 属性标签
         self.journaled_label = QLabel()
