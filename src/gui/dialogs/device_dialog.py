@@ -1,7 +1,7 @@
 """
 设备选择对话框
 
-用于选择物理硬盘设备。
+用于选择物理硬盘设备，支持 USB设备。
 """
 
 import os
@@ -18,11 +18,12 @@ from PyQt6.QtCore import Qt
 class DeviceInfo:
     """设备信息"""
     
-    def __init__(self, path: str, name: str, size: int = 0, model: str = ""):
+    def __init__(self, path: str, name: str, size: int = 0, model: str = "", is_usb: bool = False):
         self.path = path
         self.name = name
         self.size = size
         self.model = model
+        self.is_usb = is_usb
     
     @property
     def size_str(self) -> str:
@@ -39,9 +40,10 @@ class DeviceInfo:
             return f"{self.size / (1024 * 1024 * 1024):.2f} GB"
     
     def __str__(self) -> str:
+        usb_marker = " [USB]" if self.is_usb else ""
         if self.model:
-            return f"{self.name} - {self.model} ({self.size_str})"
-        return f"{self.name} ({self.size_str})"
+            return f"{self.name}{usb_marker} - {self.model} ({self.size_str})"
+        return f"{self.name}{usb_marker} ({self.size_str})"
 
 
 def detect_devices() -> List[DeviceInfo]:
@@ -58,7 +60,7 @@ def detect_devices() -> List[DeviceInfo]:
         # Linux: 检查 /dev/sd*, /dev/nvme*, /dev/vd* 等
         dev_paths = []
         
-        # SCSI/SATA 设备及其分区
+        # SCSI/SATA/USB 设备及其分区
         for i in range(26):
             dev_base = f"sd{chr(97 + i)}"
             dev_path = f"/dev/{dev_base}"
@@ -99,45 +101,67 @@ def detect_devices() -> List[DeviceInfo]:
             name = os.path.basename(dev_path)
             size = _get_device_size_linux(dev_path)
             model = _get_device_model_linux(dev_path)
+            is_usb = _is_removable_device(dev_path)
             # 检查权限
             readable = os.access(dev_path, os.R_OK)
             if not readable:
                 name += " (需要root权限)"
-            devices.append(DeviceInfo(dev_path, name, size, model))
+            devices.append(DeviceInfo(dev_path, name, size, model, is_usb))
     
     elif system == "Windows":
         # Windows: 使用 wmic 获取磁盘信息
         try:
             import subprocess
             result = subprocess.run(
-                ['wmic', 'diskdrive', 'get', 'DeviceID,Size,Model,MediaType'],
+                ['wmic', 'diskdrive', 'get', 'DeviceID,Size,Model,MediaType,InterfaceType'],
                 capture_output=True, text=True, timeout=5
             )
             if result.returncode == 0:
                 lines = result.stdout.strip().split('\n')[1:]  # 跳过标题行
                 for line in lines:
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        # 解析设备ID
-                        device_id = None
-                        model = ''
-                        size = 0
-                        media_type = ''
-                        
+                    if not line.strip():
+                        continue
+                    # 解析字段
+                    device_id = None
+                    model = ''
+                    size = 0
+                    is_usb = False
+                    
+                    # 查找设备ID (\\.\PhysicalDriveN)
+                    if '\\\\' in line or 'PhysicalDrive' in line:
+                        parts = line.split()
                         for j, part in enumerate(parts):
-                            if part.startswith('\\\\.\\'):
+                            if 'PhysicalDrive' in part or part.startswith('\\\\'):
                                 device_id = part
-                            elif part.isdigit() and int(part) > 1000000:
+                                break
+                    
+                    if not device_id:
+                        # 尝试另一种解析方式
+                        if 'PhysicalDrive' in line:
+                            idx = line.find('PhysicalDrive')
+                            device_id = '\\\\.\\' + line[idx:idx+16].split()[0]
+                    
+                    if device_id:
+                        # 查找大小
+                        for part in line.split():
+                            if part.isdigit() and int(part) > 1000000:
                                 size = int(part)
+                                break
                         
-                        if device_id:
-                            # 获取完整模型名称
-                            model_parts = [p for p in parts if not p.startswith('\\\\.\\') and not p.isdigit()]
-                            model = ' '.join(model_parts[:-1]) if len(model_parts) > 1 else ''
-                            
-                            name = device_id.replace('\\\\\\\\.\\\\', '')
-                            devices.append(DeviceInfo(device_id, name, size, model))
-        except Exception:
+                        # 检查是否是 USB
+                        is_usb = 'USB' in line.upper() or 'EXTERNAL' in line.upper() or 'REMOVABLE' in line.upper()
+                        
+                        # 获取型号
+                        model_start = line.find('PhysicalDrive')
+                        if model_start > 0:
+                            model_part = line[model_start:]
+                            parts = model_part.split()
+                            if len(parts) > 1:
+                                model = ' '.join(parts[1:-1]) if len(parts) > 2 else parts[1]
+                        
+                        name = device_id.split('\\')[-1] if '\\' in device_id else device_id
+                        devices.append(DeviceInfo(device_id, name, size, model, is_usb))
+        except Exception as e:
             # 备用方案：直接添加 PhysicalDrive
             for i in range(10):
                 dev_path = f"\\\\.\\PhysicalDrive{i}"
@@ -154,6 +178,23 @@ def detect_devices() -> List[DeviceInfo]:
                 devices.append(DeviceInfo(dev_path, name, size))
     
     return devices
+
+
+def _is_removable_device(dev_path: str) -> bool:
+    """检查是否是可移动设备（USB）"""
+    try:
+        basename = os.path.basename(dev_path)
+        # 去除分区号
+        if basename[-1].isdigit():
+            basename = basename.rstrip('0123456789')
+        
+        removable_file = f"/sys/block/{basename}/removable"
+        if os.path.exists(removable_file):
+            with open(removable_file, 'r') as f:
+                return f.read().strip() == '1'
+    except:
+        pass
+    return False
 
 
 def _get_device_size_linux(dev_path: str) -> int:
