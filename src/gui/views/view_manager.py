@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QTreeWidget, QTreeWidgetItem, QTableWidget,
     QTableWidgetItem, QSplitter, QStackedWidget, QScrollArea,
-    QFrame, QSizePolicy, QAbstractItemView
+    QFrame, QSizePolicy, QAbstractItemView, QHeaderView
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap, QFont
