@@ -233,6 +233,7 @@ class ColumnViewWidget(QWidget):
     
     item_clicked = pyqtSignal(dict)
     item_double_clicked = pyqtSignal(dict)
+    load_subitems_requested = pyqtSignal(int)  # 请求加载子文件夹内容
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -313,9 +314,27 @@ class ColumnViewWidget(QWidget):
     
     def _load_subitems(self, folder: Dict[str, Any]):
         """加载子项目"""
-        # TODO: 实现加载子项目
-        # 这需要从 Catalog B-tree 获取文件夹内容
-        pass
+        folder_id = folder.get('id')
+        if folder_id:
+            self.load_subitems_requested.emit(folder_id)
+    
+    def add_subitems_column(self, items: List[Dict[str, Any]]):
+        """
+        添加子项目列（由外部调用，加载完成后）
+        
+        Args:
+            items: 子项目列表
+        """
+        # 移除后续列（如果有）
+        while len(self._columns) > 1:
+            last_widget = self.splitter.widget(len(self._columns) - 1)
+            if last_widget:
+                last_widget.deleteLater()
+            self._columns.pop()
+        
+        # 添加新列
+        if items:
+            self._add_column(items)
 
 
 class GalleryViewWidget(QWidget):
@@ -396,9 +415,68 @@ class GalleryViewWidget(QWidget):
     
     def _update_preview(self, item: Dict[str, Any]):
         """更新预览"""
-        # TODO: 实现文件预览
-        # 这需要根据文件类型显示不同的预览
-        self.preview_label.setText(f"预览: {item['name']}")
+        name = item.get('name', '')
+        item_type = item.get('type', 'file')
+        
+        if item_type == 'folder':
+            self.preview_label.setText(
+                f"📁 {name}\n\n"
+                f"类型: 文件夹\n"
+                f"CNID: {item.get('id', '-')}\n"
+                f"创建日期: {item.get('create_date', '-')}\n"
+                f"修改日期: {item.get('mod_date', '-')}"
+            )
+        else:
+            size = item.get('size', 0)
+            ext = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+            
+            # 根据扩展名显示类型图标
+            type_icon = '📄'
+            type_desc = '文件'
+            
+            if ext in ('jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp', 'icns'):
+                type_icon = '🖼️'
+                type_desc = '图片'
+            elif ext in ('mp3', 'wav', 'aac', 'flac', 'm4a', 'aiff'):
+                type_icon = '🎵'
+                type_desc = '音频'
+            elif ext in ('mp4', 'mov', 'avi', 'mkv', 'm4v'):
+                type_icon = '🎬'
+                type_desc = '视频'
+            elif ext in ('txt', 'md', 'rtf', 'doc', 'docx', 'pdf'):
+                type_icon = '📝'
+                type_desc = '文档'
+            elif ext in ('zip', 'gz', 'tar', 'dmg', 'iso', '7z', 'rar'):
+                type_icon = '📦'
+                type_desc = '压缩包'
+            elif ext in ('py', 'js', 'c', 'cpp', 'java', 'swift', 'rs'):
+                type_icon = '💻'
+                type_desc = '源代码'
+            elif ext in ('app', 'exe', 'bin', 'sh'):
+                type_icon = '⚙️'
+                type_desc = '可执行文件'
+            elif ext in ('plist', 'json', 'xml', 'yaml', 'yml'):
+                type_icon = '📋'
+                type_desc = '配置文件'
+            
+            # 格式化大小
+            if size < 1024:
+                size_str = f"{size} B"
+            elif size < 1024 * 1024:
+                size_str = f"{size / 1024:.1f} KB"
+            elif size < 1024 * 1024 * 1024:
+                size_str = f"{size / (1024 * 1024):.1f} MB"
+            else:
+                size_str = f"{size / (1024 * 1024 * 1024):.2f} GB"
+            
+            self.preview_label.setText(
+                f"{type_icon} {name}\n\n"
+                f"类型: {type_desc} ({ext.upper() if ext else '未知'})\n"
+                f"大小: {size_str}\n"
+                f"CNID: {item.get('id', '-')}\n"
+                f"创建日期: {item.get('create_date', '-')}\n"
+                f"修改日期: {item.get('mod_date', '-')}"
+            )
 
 
 class ViewManager(QWidget):
@@ -415,11 +493,13 @@ class ViewManager(QWidget):
     
     item_clicked = pyqtSignal(dict)
     item_double_clicked = pyqtSignal(dict)
+    column_subitems_requested = pyqtSignal(int)  # 分栏视图请求加载子项
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self._setup_ui()
         self._current_mode = ViewMode.LIST
+        self._pending_column_folder_id = -1
     
     def _setup_ui(self):
         """设置 UI"""
@@ -444,6 +524,7 @@ class ViewManager(QWidget):
         
         self.column_view.item_clicked.connect(self.item_clicked.emit)
         self.column_view.item_double_clicked.connect(self.item_double_clicked.emit)
+        self.column_view.load_subitems_requested.connect(self._on_column_load_subitems)
         
         self.gallery_view.item_clicked.connect(self.item_clicked.emit)
         self.gallery_view.item_double_clicked.connect(self.item_double_clicked.emit)
@@ -455,6 +536,20 @@ class ViewManager(QWidget):
         self.stack.addWidget(self.gallery_view)
         
         layout.addWidget(self.stack)
+    
+    def _on_column_load_subitems(self, folder_id: int):
+        """处理分栏视图的子项加载请求"""
+        self._pending_column_folder_id = folder_id
+        self.column_subitems_requested.emit(folder_id)
+    
+    def set_column_subitems(self, items: List[Dict[str, Any]]):
+        """
+        设置分栏视图的子项（由 MainWindow 加载完成后调用）
+        
+        Args:
+            items: 子项目列表
+        """
+        self.column_view.add_subitems_column(items)
     
     def set_view_mode(self, mode: ViewMode):
         """

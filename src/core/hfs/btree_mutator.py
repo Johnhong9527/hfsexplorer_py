@@ -504,10 +504,60 @@ class BTreeMutator:
             )
         else:
             # 父节点也需要分裂
-            # TODO: 实现递归分裂
+            # 计算分裂点
+            split_point = parent_node.num_records // 2
+            
+            # 收集所有记录
+            records = []
+            for i in range(parent_node.num_records):
+                records.append(parent_node.get_record_data(i))
+            
+            # 插入新记录
+            insert_index = self._find_insert_index_in_leaf(parent_node, split_key)
+            index_record = split_key + struct.pack('>I', right_node_number)
+            records.insert(insert_index, index_record)
+            
+            # 分割记录
+            left_records = records[:split_point]
+            right_records = records[split_point:]
+            
+            # 分配新节点
+            new_parent_number = self._allocate_node()
+            if new_parent_number == -1:
+                return BTreeMutationResult(
+                    success=False,
+                    error="无法分配新父节点"
+                )
+            
+            # 写入左节点（原节点）
+            self._write_records_to_node(parent_node, left_records)
+            
+            # 写入右节点（新节点）
+            new_parent = self.btree.get_node(new_parent_number)
+            self._write_records_to_node(new_parent, right_records)
+            
+            # 更新节点描述符
+            parent_node.descriptor.numRecords = len(left_records)
+            new_parent.descriptor.numRecords = len(right_records)
+            new_parent.descriptor.kind = parent_node.descriptor.kind
+            new_parent.descriptor.height = parent_node.descriptor.height
+            
+            # 获取分裂键
+            parent_split_key = right_records[0][:len(split_key)]
+            
+            # 递归更新
+            grandparent_result = self._update_parent_after_split(
+                parent_node, new_parent_number, parent_split_key
+            )
+            
+            # 写入节点
+            self._write_node(parent_node)
+            self._write_node(new_parent)
+            
             return BTreeMutationResult(
-                success=False,
-                error="父节点分裂尚未实现"
+                success=True,
+                new_root=grandparent_result.new_root,
+                nodes_modified=[parent_node.descriptor.fLink, new_parent_number]
             )
     
     def _create_new_root(self, left_node: BTreeNode, 
@@ -573,9 +623,40 @@ class BTreeMutator:
         Returns:
             父节点，如果不存在则返回 None
         """
-        # TODO: 实现父节点查找
-        # 这需要从根节点开始遍历，查找包含指向该节点的指针的索引节点
-        return None
+        # 从根节点开始遍历
+        root_number = self.header.rootNode
+        if root_number == 0:
+            return None
+        
+        target_node_number = node.descriptor.fLink
+        
+        # BFS 查找父节点
+        def _search_parent(current_node: BTreeNode) -> Optional[BTreeNode]:
+            if not current_node.descriptor.is_index:
+                return None
+            
+            for i in range(current_node.num_records):
+                data = current_node.get_record_data(i)
+                
+                # 解析键长度
+                key_length = struct.unpack_from('>H', data, 0)[0]
+                
+                # 子节点号在键之后
+                child_number = struct.unpack_from('>I', data, 2 + key_length)[0]
+                
+                if child_number == target_node_number:
+                    return current_node
+                
+                # 递归查找
+                child_node = self.btree.get_node(child_number)
+                result = _search_parent(child_node)
+                if result is not None:
+                    return result
+            
+            return None
+        
+        root_node = self.btree.get_node(root_number)
+        return _search_parent(root_node)
     
     def _insert_index_record(self, node: BTreeNode, key_data: bytes, 
                             child_number: int):
@@ -818,8 +899,32 @@ class BTreeMutator:
         Args:
             node: 节点
         """
-        # TODO: 实现从父节点删除记录
-        pass
+        parent_node = self._find_parent_node(node)
+        if parent_node is None:
+            return
+        
+        target_node_number = node.descriptor.fLink
+        
+        # 查找并删除指向该节点的记录
+        for i in range(parent_node.num_records):
+            data = parent_node.get_record_data(i)
+            
+            # 解析键长度
+            key_length = struct.unpack_from('>H', data, 0)[0]
+            
+            # 子节点号在键之后
+            child_number = struct.unpack_from('>I', data, 2 + key_length)[0]
+            
+            if child_number == target_node_number:
+                # 删除该记录
+                self._delete_from_node(parent_node, i)
+                self._write_node(parent_node)
+                
+                # 检查是否需要处理下溢
+                if self._node_underflow(parent_node):
+                    self._handle_underflow(parent_node)
+                
+                break
     
     def _update_parent_key(self, node: BTreeNode):
         """
@@ -828,8 +933,58 @@ class BTreeMutator:
         Args:
             node: 节点
         """
-        # TODO: 实现更新父节点键
-        pass
+        parent_node = self._find_parent_node(node)
+        if parent_node is None:
+            return
+        
+        target_node_number = node.descriptor.fLink
+        
+        # 获取节点的第一个记录的键
+        if node.num_records == 0:
+            return
+        
+        first_record = node.get_record_data(0)
+        new_key_length = struct.unpack_from('>H', first_record, 0)[0]
+        new_key = first_record[:2 + new_key_length]
+        
+        # 查找并更新父节点中指向该节点的记录的键
+        for i in range(parent_node.num_records):
+            data = parent_node.get_record_data(i)
+            
+            # 解析键长度
+            key_length = struct.unpack_from('>H', data, 0)[0]
+            
+            # 子节点号在键之后
+            child_number = struct.unpack_from('>I', data, 2 + key_length)[0]
+            
+            if child_number == target_node_number:
+                # 更新键
+                old_record_size = len(data)
+                new_child_ptr = struct.pack('>I', child_number)
+                new_record = new_key + new_child_ptr
+                
+                # 计算大小差异
+                size_diff = len(new_record) - old_record_size
+                
+                # 如果大小相同，直接替换
+                if size_diff == 0:
+                    offset = parent_node.get_record_offset(i)
+                    parent_node.raw_data[offset:offset + len(new_record)] = new_record
+                else:
+                    # 需要重新组织节点
+                    # 收集所有记录
+                    records = []
+                    for j in range(parent_node.num_records):
+                        if j == i:
+                            records.append(new_record)
+                        else:
+                            records.append(parent_node.get_record_data(j))
+                    
+                    # 重写节点
+                    self._write_records_to_node(parent_node, records)
+                
+                self._write_node(parent_node)
+                break
     
     def _write_node(self, node: BTreeNode):
         """
@@ -838,11 +993,18 @@ class BTreeMutator:
         Args:
             node: 节点
         """
-        # TODO: 实现节点写入
-        # 这需要：
-        # 1. 计算节点在文件中的偏移量
-        # 2. 写入节点数据
-        pass
+        # 计算节点在文件中的偏移量
+        # B-tree 数据从 header 偏移开始，第一个节点是 header 节点
+        node_number = node.descriptor.fLink  # fLink 存储节点号
+        
+        # 计算偏移量：B-tree 起始偏移 + 节点号 * 节点大小
+        # 注意：节点 0 是 header 节点，实际数据从节点 1 开始
+        offset = self.btree.start_offset + node_number * self.node_size
+        
+        # 写入节点数据
+        self.stream.seek(offset)
+        self.stream.write(bytes(node.raw_data))
+        self.stream.flush()
     
     def _allocate_node(self) -> int:
         """
@@ -851,12 +1013,39 @@ class BTreeMutator:
         Returns:
             新节点号
         """
-        # TODO: 实现节点分配
-        # 这需要：
-        # 1. 查找空闲节点
-        # 2. 更新空闲节点列表
-        # 3. 返回新节点号
-        return -1
+        # 检查空闲节点列表
+        if self.header.firstLeafNode != 0:
+            # 从空闲列表中取一个节点
+            free_node_number = self.header.firstLeafNode
+            free_node = self.btree.get_node(free_node_number)
+            
+            # 更新空闲列表头
+            self.header.firstLeafNode = free_node.descriptor.fLink
+            self.header.freeNodes -= 1
+            
+            # 写入更新后的头记录
+            self._write_header()
+            
+            return free_node_number
+        else:
+            # 没有空闲节点，需要扩展文件
+            # 计算新节点号
+            new_node_number = self.header.totalNodes
+            
+            # 扩展文件
+            new_offset = self.btree.start_offset + (new_node_number + 1) * self.node_size
+            
+            try:
+                self.stream.seek(new_offset - 1)
+                self.stream.write(b'\x00')
+            except Exception:
+                return -1
+            
+            # 更新头记录
+            self.header.totalNodes += 1
+            self._write_header()
+            
+            return new_node_number
     
     def _free_node(self, node_number: int):
         """
@@ -865,11 +1054,35 @@ class BTreeMutator:
         Args:
             node_number: 节点号
         """
-        # TODO: 实现节点释放
-        # 这需要：
-        # 1. 将节点添加到空闲列表
-        # 2. 更新空闲节点计数
-        pass
+        # 获取节点
+        node = self.btree.get_node(node_number)
+        
+        # 清空节点数据
+        node.raw_data = bytearray(self.node_size)
+        node.descriptor.numRecords = 0
+        
+        # 将节点添加到空闲列表
+        node.descriptor.fLink = self.header.firstLeafNode
+        self.header.firstLeafNode = node_number
+        self.header.freeNodes += 1
+        
+        # 写入节点
+        self._write_node(node)
+        
+        # 写入更新后的头记录
+        self._write_header()
+    
+    def _write_header(self):
+        """写入 B-tree 头记录"""
+        # 头记录存储在节点 0 中
+        header_offset = self.btree.start_offset + self.node_size  # 跳过节点描述符
+        
+        # 序列化头记录
+        header_data = self.header.to_bytes()
+        
+        self.stream.seek(header_offset)
+        self.stream.write(header_data)
+        self.stream.flush()
 
 
 class CatalogMutator:

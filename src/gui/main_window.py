@@ -44,6 +44,7 @@ from src.core.hfs import (
 from src.core.crypto import (
     EncryptedVolumeHeader,
     EncryptedVolume,
+    EncryptedVolumeParser,
     Keybag,
     CryptoError,
 )
@@ -331,6 +332,7 @@ class MainWindow(QMainWindow):
         self.view_manager = ViewManager()
         self.view_manager.item_clicked.connect(self._on_view_item_clicked)
         self.view_manager.item_double_clicked.connect(self._on_view_item_double_clicked)
+        self.view_manager.column_subitems_requested.connect(self._on_column_subitems_requested)
         
         # 文件表格（保留用于兼容）
         self.table_widget = QTableWidget()
@@ -416,11 +418,42 @@ class MainWindow(QMainWindow):
                                 self.setEnabled(True)
                                 return
                             
-                            # TODO: 实际解密逻辑
-                            QMessageBox.information(
-                                self, "加密卷",
-                                "检测到加密卷，但解密功能尚未完全实现。"
-                            )
+                            # 尝试解析加密卷
+                            try:
+                                with open(path, 'rb') as ef:
+                                    parser = EncryptedVolumeParser(ef)
+                                    enc_volume = parser.parse()
+                                    
+                                    # 尝试用密码解锁
+                                    if enc_volume.unlock(password):
+                                        QMessageBox.information(
+                                            self, "加密卷",
+                                            "密码验证成功！\n"
+                                            "注意：加密卷的透明解密功能仍在开发中。\n"
+                                            "当前仅支持密码验证，无法读取加密内容。"
+                                        )
+                                    else:
+                                        QMessageBox.warning(
+                                            self, "加密卷",
+                                            "密码错误或密钥包数据不完整。"
+                                        )
+                                        self.setEnabled(True)
+                                        return
+                            except CryptoError as e:
+                                QMessageBox.warning(
+                                    self, "加密卷",
+                                    f"解密失败: {e}\n\n"
+                                    "注意：密钥包解析功能仍在开发中。"
+                                )
+                                self.setEnabled(True)
+                                return
+                            except Exception as e:
+                                QMessageBox.warning(
+                                    self, "加密卷",
+                                    f"加密卷处理失败: {e}"
+                                )
+                                self.setEnabled(True)
+                                return
                     except CryptoError as e:
                         QMessageBox.warning(self, "警告", f"解析加密卷头失败: {e}")
         except Exception:
@@ -647,6 +680,28 @@ class MainWindow(QMainWindow):
         if item_data['type'] == 'folder':
             self._load_folder_contents(item_data['id'])
             self.up_action.setEnabled(True)
+    
+    def _on_column_subitems_requested(self, folder_id: int):
+        """分栏视图请求加载子项"""
+        if folder_id in self.folder_cache:
+            # 已有缓存，直接设置
+            self.view_manager.set_column_subitems(self.folder_cache[folder_id])
+        else:
+            # 异步加载，加载完成后设置
+            if self.current_path is None:
+                return
+            
+            # 使用线程加载
+            thread = FolderLoadThread(self.current_path, folder_id)
+            thread.finished.connect(
+                lambda fid, contents: self._on_column_subitems_loaded(fid, contents)
+            )
+            thread.start()
+    
+    def _on_column_subitems_loaded(self, folder_id: int, contents: list):
+        """分栏视图子项加载完成"""
+        self.folder_cache[folder_id] = contents
+        self.view_manager.set_column_subitems(contents)
     
     def _update_table(self, contents: list):
         """更新表格内容"""

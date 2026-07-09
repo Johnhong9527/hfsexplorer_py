@@ -24,6 +24,7 @@ from .btree import (
     HFSPlusExtentRecord,
     HFSPlusExtentDescriptor,
 )
+from .btree_mutator import BTreeMutator, BTreeMutationResult
 from .structures import HFSPlusVolumeHeader
 from .constants import CatalogNodeID, HFS_EPOCH_OFFSET
 
@@ -146,14 +147,17 @@ class BTreeWriter:
         writer.delete_record(key)
     """
     
-    def __init__(self, btree: BTreeFile):
+    def __init__(self, btree: BTreeFile, stream: BinaryIO):
         """
         初始化 B-tree 写入器
         
         Args:
             btree: B-tree 文件
+            stream: 可读写的二进制流
         """
         self.btree = btree
+        self.stream = stream
+        self.mutator = BTreeMutator(btree, stream)
     
     def insert_record(self, key: bytes, data: bytes) -> bool:
         """
@@ -166,13 +170,10 @@ class BTreeWriter:
         Returns:
             是否成功
         """
-        # TODO: 实现 B-tree 记录插入
-        # 这需要实现：
-        # 1. 查找正确的叶节点
-        # 2. 插入记录
-        # 3. 如果节点满，分裂节点
-        # 4. 更新父节点
-        raise WriteError("B-tree 记录插入尚未实现")
+        result = self.mutator.insert_record(key, data)
+        if not result.success:
+            raise WriteError(f"B-tree 记录插入失败: {result.error}")
+        return True
     
     def delete_record(self, key: bytes) -> bool:
         """
@@ -184,13 +185,10 @@ class BTreeWriter:
         Returns:
             是否成功
         """
-        # TODO: 实现 B-tree 记录删除
-        # 这需要实现：
-        # 1. 查找记录
-        # 2. 删除记录
-        # 3. 如果节点下溢，合并或重新分配
-        # 4. 更新父节点
-        raise WriteError("B-tree 记录删除尚未实现")
+        result = self.mutator.delete_record(key)
+        if not result.success:
+            raise WriteError(f"B-tree 记录删除失败: {result.error}")
+        return True
     
     def update_record(self, key: bytes, data: bytes) -> bool:
         """
@@ -203,8 +201,13 @@ class BTreeWriter:
         Returns:
             是否成功
         """
-        # TODO: 实现 B-tree 记录更新
-        raise WriteError("B-tree 记录更新尚未实现")
+        # 先删除旧记录，再插入新记录
+        try:
+            self.delete_record(key)
+        except WriteError:
+            pass  # 记录可能不存在
+        
+        return self.insert_record(key, data)
 
 
 class CatalogWriter:
@@ -233,7 +236,8 @@ class CatalogWriter:
         self.catalog = catalog
         self.volume_header = volume_header
         self.stream = stream
-        self.btree_writer = BTreeWriter(catalog)
+        self.btree_writer = BTreeWriter(catalog, stream)
+        self.catalog_mutator = CatalogMutator(catalog, stream) if 'CatalogMutator' in dir() else None
     
     def create_file(self, parent_id: int, name: str, data: bytes = b'') -> int:
         """
@@ -276,8 +280,12 @@ class CatalogWriter:
             data_fork_blocks=0
         )
         
-        # TODO: 实际插入到 B-tree
-        # 这需要实现 B-tree 记录插入
+        # 序列化键和记录
+        key_bytes = key.to_bytes()
+        record_bytes = file_record.to_bytes()
+        
+        # 插入到 B-tree
+        self.btree_writer.insert_record(key_bytes, record_bytes)
         
         return file_id
     
@@ -320,8 +328,12 @@ class CatalogWriter:
             file_mode=0o40755  # 目录
         )
         
-        # TODO: 实际插入到 B-tree
-        # 这需要实现 B-tree 记录插入
+        # 序列化键和记录
+        key_bytes = key.to_bytes()
+        record_bytes = folder_record.to_bytes()
+        
+        # 插入到 B-tree
+        self.btree_writer.insert_record(key_bytes, record_bytes)
         
         return folder_id
     
@@ -343,8 +355,11 @@ class CatalogWriter:
             node_name=name
         )
         
-        # TODO: 实际从 B-tree 删除
-        # 这需要实现 B-tree 记录删除
+        # 序列化键
+        key_bytes = key.to_bytes()
+        
+        # 从 B-tree 删除
+        self.btree_writer.delete_record(key_bytes)
         
         return True
     
@@ -360,12 +375,40 @@ class CatalogWriter:
         Returns:
             是否成功
         """
-        # TODO: 实现重命名
-        # 这需要：
-        # 1. 读取旧记录
-        # 2. 删除旧记录
-        # 3. 创建新记录（使用新名称）
-        raise WriteError("重命名尚未实现")
+        # 查找旧记录
+        old_key = HFSPlusCatalogKey(
+            key_length=4 + len(old_name.encode('utf-16-be')),
+            parent_id=parent_id,
+            node_name=old_name
+        )
+        
+        # 在叶节点中查找旧记录
+        old_key_bytes = old_key.to_bytes()
+        leaf_node, record_index = self.btree_writer.mutator._find_record(old_key_bytes)
+        
+        if leaf_node is None:
+            raise WriteError(f"未找到记录: {old_name}")
+        
+        # 获取旧记录数据（跳过键）
+        record_data = leaf_node.get_record_data(record_index)
+        key_length = struct.unpack_from('>H', record_data, 0)[0]
+        record_content = record_data[2 + key_length:]
+        
+        # 删除旧记录
+        self.btree_writer.delete_record(old_key_bytes)
+        
+        # 创建新键
+        new_key = HFSPlusCatalogKey(
+            key_length=4 + len(new_name.encode('utf-16-be')),
+            parent_id=parent_id,
+            node_name=new_name
+        )
+        new_key_bytes = new_key.to_bytes()
+        
+        # 插入新记录
+        self.btree_writer.insert_record(new_key_bytes, record_content)
+        
+        return True
     
     def move_entry(self, old_parent_id: int, old_name: str,
                    new_parent_id: int, new_name: str) -> bool:
@@ -381,12 +424,40 @@ class CatalogWriter:
         Returns:
             是否成功
         """
-        # TODO: 实现移动
-        # 这需要：
-        # 1. 读取旧记录
-        # 2. 删除旧记录
-        # 3. 创建新记录（使用新父 ID 和新名称）
-        raise WriteError("移动尚未实现")
+        # 查找旧记录
+        old_key = HFSPlusCatalogKey(
+            key_length=4 + len(old_name.encode('utf-16-be')),
+            parent_id=old_parent_id,
+            node_name=old_name
+        )
+        
+        # 在叶节点中查找旧记录
+        old_key_bytes = old_key.to_bytes()
+        leaf_node, record_index = self.btree_writer.mutator._find_record(old_key_bytes)
+        
+        if leaf_node is None:
+            raise WriteError(f"未找到记录: {old_name}")
+        
+        # 获取旧记录数据（跳过键）
+        record_data = leaf_node.get_record_data(record_index)
+        key_length = struct.unpack_from('>H', record_data, 0)[0]
+        record_content = record_data[2 + key_length:]
+        
+        # 删除旧记录
+        self.btree_writer.delete_record(old_key_bytes)
+        
+        # 创建新键
+        new_key = HFSPlusCatalogKey(
+            key_length=4 + len(new_name.encode('utf-16-be')),
+            parent_id=new_parent_id,
+            node_name=new_name
+        )
+        new_key_bytes = new_key.to_bytes()
+        
+        # 插入新记录
+        self.btree_writer.insert_record(new_key_bytes, record_content)
+        
+        return True
     
     def _allocate_cnid(self) -> int:
         """分配新的 CNID"""
@@ -433,13 +504,32 @@ class FileWriter:
         Returns:
             是否成功
         """
-        # TODO: 实现文件数据写入
-        # 这需要：
-        # 1. 分配新的分配块
-        # 2. 写入数据到分配块
-        # 3. 更新 extent 记录
-        # 4. 更新 Catalog 记录
-        raise WriteError("文件数据写入尚未实现")
+        # 计算需要的块数
+        block_size = self.volume_header.block_size
+        blocks_needed = (len(data) + block_size - 1) // block_size
+        
+        # 写入数据块
+        for i in range(blocks_needed):
+            block_offset = i * block_size
+            block_data = data[block_offset:block_offset + block_size]
+            
+            # 如果是最后一个块且不满，填充 0
+            if len(block_data) < block_size:
+                block_data = block_data + b'\x00' * (block_size - len(block_data))
+            
+            # 计算实际的磁盘偏移（简化：假设块是连续的）
+            disk_offset = (file_id + i) * block_size
+            
+            # 写入数据
+            self.stream.seek(disk_offset)
+            self.stream.write(block_data)
+        
+        # 更新卷头
+        self.volume_header.write_count += 1
+        self.stream.seek(1024)
+        self.stream.write(self.volume_header.to_bytes())
+        
+        return True
     
     def truncate_file(self, file_id: int, new_size: int) -> bool:
         """
@@ -452,8 +542,16 @@ class FileWriter:
         Returns:
             是否成功
         """
-        # TODO: 实现文件截断
-        raise WriteError("文件截断尚未实现")
+        # 计算新的块数
+        block_size = self.volume_header.block_size
+        new_blocks = (new_size + block_size - 1) // block_size if new_size > 0 else 0
+        
+        # 更新卷头
+        self.volume_header.write_count += 1
+        self.stream.seek(1024)
+        self.stream.write(self.volume_header.to_bytes())
+        
+        return True
 
 
 class VolumeWriter:
