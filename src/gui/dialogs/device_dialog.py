@@ -58,30 +58,51 @@ def detect_devices() -> List[DeviceInfo]:
         # Linux: 检查 /dev/sd*, /dev/nvme*, /dev/vd* 等
         dev_paths = []
         
-        # SCSI/SATA 设备
+        # SCSI/SATA 设备及其分区
         for i in range(26):
-            dev_path = f"/dev/sd{chr(97 + i)}"
+            dev_base = f"sd{chr(97 + i)}"
+            dev_path = f"/dev/{dev_base}"
             if os.path.exists(dev_path):
                 dev_paths.append(dev_path)
+                # 检测分区
+                for j in range(1, 20):
+                    part_path = f"/dev/{dev_base}{j}"
+                    if os.path.exists(part_path):
+                        dev_paths.append(part_path)
         
-        # NVMe 设备
+        # NVMe 设备及其分区
         for i in range(10):
             for j in range(10):
-                dev_path = f"/dev/nvme{i}n{j}"
+                dev_base = f"nvme{i}n{j}"
+                dev_path = f"/dev/{dev_base}"
                 if os.path.exists(dev_path):
                     dev_paths.append(dev_path)
+                    # 检测分区
+                    for k in range(1, 20):
+                        part_path = f"/dev/{dev_base}p{k}"
+                        if os.path.exists(part_path):
+                            dev_paths.append(part_path)
         
-        # 虚拟设备
+        # 虚拟设备及其分区
         for i in range(26):
-            dev_path = f"/dev/vd{chr(97 + i)}"
+            dev_base = f"vd{chr(97 + i)}"
+            dev_path = f"/dev/{dev_base}"
             if os.path.exists(dev_path):
                 dev_paths.append(dev_path)
+                for j in range(1, 20):
+                    part_path = f"/dev/{dev_base}{j}"
+                    if os.path.exists(part_path):
+                        dev_paths.append(part_path)
         
         # 获取设备信息
         for dev_path in dev_paths:
             name = os.path.basename(dev_path)
             size = _get_device_size_linux(dev_path)
             model = _get_device_model_linux(dev_path)
+            # 检查权限
+            readable = os.access(dev_path, os.R_OK)
+            if not readable:
+                name += " (需要root权限)"
             devices.append(DeviceInfo(dev_path, name, size, model))
     
     elif system == "Windows":

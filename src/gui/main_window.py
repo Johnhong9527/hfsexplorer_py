@@ -460,6 +460,17 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             device_path = dialog.get_selected_device()
             if device_path:
+                # 检查权限
+                import os
+                if not os.access(device_path, os.R_OK):
+                    QMessageBox.warning(
+                        self, "权限错误",
+                        f"无法读取设备: {device_path}\n\n"
+                        f"请使用 sudo 运行程序以访问物理设备:\n"
+                        f"sudo python3 main.py"
+                    )
+                    return
+                
                 self._load_filesystem(device_path)
     
     def _load_filesystem(self, path: str):
