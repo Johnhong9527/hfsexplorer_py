@@ -63,6 +63,12 @@ from src.gui.panels.info_panels import FilePropertiesPanel
 from src.gui.dialogs.password_dialog import PasswordDialog
 from src.gui.views.view_manager import ViewManager, ViewMode
 
+try:
+    from src.core.dmg import DMGImage, DMGError
+except ImportError:
+    DMGImage = None
+    DMGError = Exception
+
 
 class FileLoadThread(QThread):
     """文件加载线程"""
@@ -227,6 +233,13 @@ class MainWindow(QMainWindow):
         extract_action.setShortcut("Ctrl+E")
         extract_action.triggered.connect(self._extract_selected)
         file_menu.addAction(extract_action)
+        
+        file_menu.addSeparator()
+        
+        # 格式化选项
+        format_action = QAction("格式化(&F)...", self)
+        format_action.triggered.connect(self._show_format_dialog)
+        file_menu.addAction(format_action)
         
         file_menu.addSeparator()
         
@@ -426,6 +439,59 @@ class MainWindow(QMainWindow):
         self.folder_cache.clear()
         self.encrypted_volume = None
         self.is_encrypted = False
+        self.dmg_image = None  # DMG 镜像对象
+        
+        # 检查是否是 DMG 文件
+        if path.lower().endswith('.dmg') and DMGImage is not None:
+            try:
+                dmg = DMGImage(path)
+                if dmg.partition_count > 0:
+                    # 找到 HFS+ 分区
+                    hfs_partition = None
+                    for partition in dmg.partitions:
+                        # 简单检查：假设第一个分区是 HFS+
+                        hfs_partition = partition
+                        break
+                    
+                    if hfs_partition:
+                        # 提取分区数据到临时文件
+                        import tempfile
+                        temp_path = tempfile.mktemp(suffix='.img')
+                        
+                        self.statusBar().showMessage(
+                            f"正在从 DMG 提取分区: {hfs_partition.name}"
+                        )
+                        
+                        # 读取分区数据
+                        partition_data = dmg.read_partition_data(hfs_partition)
+                        
+                        # 写入临时文件
+                        with open(temp_path, 'wb') as f:
+                            f.write(partition_data)
+                        
+                        # 保存 DMG 信息
+                        self.dmg_image = dmg
+                        self.dmg_temp_path = temp_path
+                        
+                        # 使用临时文件加载
+                        path = temp_path
+                    else:
+                        QMessageBox.warning(self, "警告", "DMG 文件中没有找到分区")
+                        self.setEnabled(True)
+                        dmg.close()
+                        return
+                else:
+                    QMessageBox.warning(self, "警告", "DMG 文件中没有分区信息")
+                    self.setEnabled(True)
+                    dmg.close()
+                    return
+            except DMGError as e:
+                QMessageBox.warning(self, "DMG 错误", f"无法解析 DMG 文件:\n{e}")
+                self.setEnabled(True)
+                return
+            except Exception as e:
+                # DMG 解析失败，尝试直接作为 HFS+ 加载
+                pass
         
         # 检查是否是加密卷
         try:
@@ -1350,6 +1416,150 @@ class MainWindow(QMainWindow):
 锁定: {'是' if header.is_locked else '否'}
 """
         QMessageBox.information(self, "卷信息", info)
+    
+    def _show_format_dialog(self):
+        """显示格式化对话框"""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
+            QComboBox, QPushButton, QSpinBox, QCheckBox, QGroupBox,
+            QFileDialog, QMessageBox
+        )
+        from src.core.hfs.formatter import HFSPlusFormatter, FormatError
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("格式化 HFS+ 卷")
+        dialog.setMinimumWidth(450)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 文件选择
+        file_group = QGroupBox("目标文件")
+        file_layout = QHBoxLayout(file_group)
+        
+        self.format_path_edit = QLineEdit()
+        self.format_path_edit.setPlaceholderText("选择或输入文件路径...")
+        file_layout.addWidget(self.format_path_edit)
+        
+        browse_button = QPushButton("浏览...")
+        def browse_file():
+            path, _ = QFileDialog.getSaveFileName(
+                dialog, "选择目标文件", "",
+                "磁盘镜像 (*.img *.dmg *.raw);;所有文件 (*)"
+            )
+            if path:
+                self.format_path_edit.setText(path)
+        browse_button.clicked.connect(browse_file)
+        file_layout.addWidget(browse_button)
+        
+        layout.addWidget(file_group)
+        
+        # 卷设置
+        settings_group = QGroupBox("卷设置")
+        settings_layout = QVBoxLayout(settings_group)
+        
+        # 卷名称
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("卷名称:"))
+        name_edit = QLineEdit("Untitled")
+        name_layout.addWidget(name_edit)
+        settings_layout.addLayout(name_layout)
+        
+        # 块大小
+        block_layout = QHBoxLayout()
+        block_layout.addWidget(QLabel("块大小:"))
+        block_combo = QComboBox()
+        block_combo.addItems(["512", "1024", "2048", "4096", "8192", "16384", "32768", "65536"])
+        block_combo.setCurrentText("4096")
+        block_layout.addWidget(block_combo)
+        block_layout.addWidget(QLabel("字节"))
+        settings_layout.addLayout(block_layout)
+        
+        # 卷大小
+        size_layout = QHBoxLayout()
+        size_layout.addWidget(QLabel("卷大小:"))
+        size_spin = QSpinBox()
+        size_spin.setRange(1, 1000000)
+        size_spin.setValue(100)
+        size_spin.setSuffix(" MB")
+        size_layout.addWidget(size_spin)
+        settings_layout.addLayout(size_layout)
+        
+        layout.addWidget(settings_group)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        
+        format_button = QPushButton("格式化")
+        format_button.setStyleSheet("QPushButton { background-color: #ff6b6b; color: white; font-weight: bold; }")
+        def do_format():
+            path = self.format_path_edit.text().strip()
+            if not path:
+                QMessageBox.warning(dialog, "错误", "请选择目标文件路径")
+                return
+            
+            volume_name = name_edit.text().strip() or "Untitled"
+            block_size = int(block_combo.currentText())
+            volume_size = size_spin.value() * 1024 * 1024
+            
+            reply = QMessageBox.question(
+                dialog, "确认格式化",
+                f"确定要格式化吗？\n\n"
+                f"目标文件: {path}\n"
+                f"卷名称: {volume_name}\n"
+                f"块大小: {block_size:,} 字节\n"
+                f"卷大小: {size_spin.value()} MB\n\n"
+                f"警告：此操作将覆盖目标文件！",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            
+            try:
+                # 创建文件
+                with open(path, 'wb') as f:
+                    f.seek(volume_size - 1)
+                    f.write(b'\x00')
+                
+                # 格式化
+                formatter = HFSPlusFormatter()
+                header = formatter.format(path, volume_name, block_size)
+                
+                QMessageBox.information(
+                    dialog, "格式化成功",
+                    f"HFS+ 卷已成功创建！\n\n"
+                    f"文件: {path}\n"
+                    f"总块数: {header.total_blocks:,}\n"
+                    f"空闲块: {header.free_blocks:,}"
+                )
+                
+                dialog.accept()
+                
+                # 询问是否打开
+                reply = QMessageBox.question(
+                    self, "打开卷",
+                    "是否打开新创建的卷？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._load_filesystem(path)
+                
+            except FormatError as e:
+                QMessageBox.critical(dialog, "格式化错误", str(e))
+            except Exception as e:
+                QMessageBox.critical(dialog, "错误", f"格式化失败: {e}")
+        
+        format_button.clicked.connect(do_format)
+        button_layout.addWidget(format_button)
+        
+        cancel_button = QPushButton("取消")
+        cancel_button.clicked.connect(dialog.reject)
+        button_layout.addWidget(cancel_button)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
     
     def _show_about(self):
         """显示关于对话框"""

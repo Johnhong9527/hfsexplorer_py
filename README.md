@@ -74,6 +74,8 @@ print(f"总块数: {header.total_blocks}, 空闲块: {header.free_blocks}")
 | Catalog 写入器 | 创建文件/文件夹（已验证） |
 | 分配位图管理 | 空闲块查找和分配 |
 | **HFS+ 格式化** | 创建新的 HFS+ 文件系统 |
+| **格式化对话框** | GUI 格式化界面 |
+| **DMG 镜像支持** | 读取 Apple Disk Image |
 | 打包构建 | PyInstaller、deb、AppImage |
 
 ### ⚠️ 框架已实现（未充分测试）
