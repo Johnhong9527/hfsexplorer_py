@@ -67,6 +67,8 @@ from .structures import (
 
 from .reader import (
     HFSPlusVolumeHeaderReader,
+    HFSPlusVolume,
+    open_volume,
     read_volume_header,
     is_hfs_plus_volume,
     get_volume_info,
@@ -80,6 +82,11 @@ from .btree import (
     BTIndexRecord,
     BTLeafRecord,
     BTreeFile,
+    
+    # Unicode 比较
+    hfs_unicode_compare,
+    compare_catalog_keys,
+    compare_extent_keys,
     
     # Catalog
     HFSPlusCatalogKey,
@@ -156,6 +163,8 @@ __all__ = [
     
     # 读取器
     'HFSPlusVolumeHeaderReader',
+    'HFSPlusVolume',
+    'open_volume',
     'read_volume_header',
     'is_hfs_plus_volume',
     'get_volume_info',
@@ -167,6 +176,11 @@ __all__ = [
     'BTIndexRecord',
     'BTLeafRecord',
     'BTreeFile',
+    
+    # Unicode 比较
+    'hfs_unicode_compare',
+    'compare_catalog_keys',
+    'compare_extent_keys',
     
     # Catalog
     'HFSPlusCatalogKey',

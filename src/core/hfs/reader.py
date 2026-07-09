@@ -1,11 +1,12 @@
 """
-HFS+ 卷头解析器
+HFS+ 卷头解析器和卷读取器
 
-提供读取和解析 HFS+ 卷头的功能。
+提供读取和解析 HFS+ 卷头的功能，以及完整的卷读取接口。
 """
 
+import struct
 import os
-from typing import BinaryIO, Optional, Union
+from typing import BinaryIO, Optional, Union, List, Dict, Any
 
 from .constants import (
     VOLUME_HEADER_OFFSET,
@@ -14,6 +15,11 @@ from .constants import (
     SIGNATURE_HFSX,
 )
 from .structures import HFSPlusVolumeHeader
+from .btree import (
+    CatalogBTree, ExtentsBTree, HFSPlusFileReader,
+    HFSPlusCatalogKey, HFSPlusCatalogFolder, HFSPlusCatalogFile,
+    CatalogRecordType, ForkType,
+)
 
 
 class HFSPlusVolumeHeaderReader:
@@ -208,3 +214,242 @@ def get_volume_info(source: Union[str, BinaryIO]) -> dict:
             'next_catalog_id': header.next_catalog_id,
             'write_count': header.write_count,
         }
+
+
+# =============================================================================
+# HFS+ 卷读取器
+# =============================================================================
+
+class HFSPlusVolume:
+    """
+    HFS+ 卷读取器
+    
+    提供统一的接口来读取 HFS+ 卷的内容。
+    整合了卷头、Catalog B-tree、Extents B-tree 和文件读取器。
+    
+    Usage:
+        with HFSPlusVolume("/path/to/disk.img") as vol:
+            # 获取卷信息
+            info = vol.get_info()
+            
+            # 列出根目录
+            contents = vol.list_folder(2)  # 2 = root CNID
+            
+            # 读取文件
+            data = vol.read_file(file_id)
+    """
+    
+    def __init__(self, source: Union[str, BinaryIO], volume_offset: int = 0):
+        """
+        初始化 HFS+ 卷读取器
+        
+        Args:
+            source: 文件路径或已打开的文件对象
+            volume_offset: 卷在文件中的偏移量（用于分区支持）
+        """
+        self._source = source
+        self._volume_offset = volume_offset
+        self._file: Optional[BinaryIO] = None
+        self._should_close = False
+        self._header: Optional[HFSPlusVolumeHeader] = None
+        self._catalog: Optional[CatalogBTree] = None
+        self._extents: Optional[ExtentsBTree] = None
+        self._file_reader: Optional[HFSPlusFileReader] = None
+        
+        # 如果是字符串，打开文件
+        if isinstance(source, str):
+            self._file = open(source, 'rb')
+            self._should_close = True
+        else:
+            self._file = source
+            self._should_close = False
+    
+    def __enter__(self):
+        """上下文管理器入口"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器出口"""
+        self.close()
+    
+    def close(self):
+        """关闭文件"""
+        if self._file and self._should_close:
+            self._file.close()
+            self._file = None
+    
+    @property
+    def header(self) -> HFSPlusVolumeHeader:
+        """获取卷头"""
+        if self._header is None:
+            self._read_header()
+        return self._header
+    
+    @property
+    def catalog(self) -> CatalogBTree:
+        """获取 Catalog B-tree"""
+        if self._catalog is None:
+            self._init_btrees()
+        return self._catalog
+    
+    @property
+    def extents(self) -> ExtentsBTree:
+        """获取 Extents B-tree"""
+        if self._extents is None:
+            self._init_btrees()
+        return self._extents
+    
+    def _read_header(self):
+        """读取卷头"""
+        self._file.seek(self._volume_offset + VOLUME_HEADER_OFFSET)
+        data = self._file.read(VOLUME_HEADER_SIZE)
+        
+        if len(data) < VOLUME_HEADER_SIZE:
+            raise IOError(f"无法读取完整的卷头")
+        
+        self._header = HFSPlusVolumeHeader.from_bytes(data)
+        
+        if not self._header.is_valid:
+            raise ValueError(f"无效的 HFS+ 签名: 0x{self._header.signature:04X}")
+    
+    def _init_btrees(self):
+        """初始化 B-tree 读取器"""
+        h = self.header
+        
+        # Catalog B-tree
+        # catalogFile 是一个 ForkData，第一个 extent 描述了 B-tree 的位置
+        catalog_extents = h.catalog_extents
+        if catalog_extents and catalog_extents[0].block_count > 0:
+            catalog_start = self._volume_offset + catalog_extents[0].start_block * h.block_size
+            self._catalog = CatalogBTree(
+                self._file,
+                start_offset=catalog_start,
+                node_size=h.catalog_node_size
+            )
+        else:
+            raise IOError("Catalog B-tree 位置无效")
+        
+        # Extents B-tree
+        extents_extents = h.extents_extents
+        if extents_extents and extents_extents[0].block_count > 0:
+            extents_start = self._volume_offset + extents_extents[0].start_block * h.block_size
+            self._extents = ExtentsBTree(
+                self._file,
+                start_offset=extents_start,
+                node_size=h.extents_node_size
+            )
+        else:
+            # Extents B-tree 可能为空（小卷）
+            self._extents = ExtentsBTree(
+                self._file,
+                start_offset=0,
+                node_size=4096
+            )
+        
+        # 文件读取器
+        self._file_reader = HFSPlusFileReader(
+            self._file,
+            self._catalog,
+            self._extents,
+            block_size=h.block_size
+        )
+    
+    def get_info(self) -> Dict[str, Any]:
+        """获取卷信息"""
+        h = self.header
+        return {
+            'signature': 'HFS+' if h.is_hfs_plus else 'HFSX',
+            'version': h.version,
+            'block_size': h.block_size,
+            'total_blocks': h.total_blocks,
+            'free_blocks': h.free_blocks,
+            'volume_size': h.volume_size,
+            'file_count': h.file_count,
+            'folder_count': h.folder_count,
+            'is_journaled': h.is_journaled,
+        }
+    
+    def list_folder(self, parent_id: int = 2) -> List[Dict[str, Any]]:
+        """
+        列出文件夹内容
+        
+        Args:
+            parent_id: 父文件夹 CNID (默认 2 = 根目录)
+        
+        Returns:
+            文件夹内容列表
+        """
+        return self.catalog.list_folder_contents(parent_id)
+    
+    def read_file(self, file_id: int) -> bytes:
+        """
+        读取文件数据
+        
+        Args:
+            file_id: 文件 CNID
+        
+        Returns:
+            文件数据
+        """
+        if self._file_reader is None:
+            self._init_btrees()
+        return self._file_reader.read_data_fork(file_id)
+    
+    def get_file_info(self, file_id: int) -> Optional[Dict[str, Any]]:
+        """
+        获取文件信息
+        
+        Args:
+            file_id: 文件 CNID
+        
+        Returns:
+            文件信息字典，如果未找到则返回 None
+        """
+        for node in self.catalog.list_leaf_nodes():
+            for i in range(node.num_records):
+                data = node.get_record_data(i)
+                key = HFSPlusCatalogKey.from_bytes(data)
+                record_type = struct.unpack_from('>H', data, key.occupied_size)[0]
+                
+                if record_type == CatalogRecordType.FILE:
+                    file = HFSPlusCatalogFile.from_bytes(data, key.occupied_size)
+                    if file.file_id == file_id:
+                        return {
+                            'id': file.file_id,
+                            'name': key.node_name,
+                            'size': file.get_data_fork_size(),
+                            'create_date': file.create_date,
+                            'mod_date': file.content_mod_date,
+                            'owner_id': file.get_owner_id(),
+                            'group_id': file.get_group_id(),
+                            'mode': file.get_file_mode(),
+                        }
+                elif record_type == CatalogRecordType.FOLDER:
+                    folder = HFSPlusCatalogFolder.from_bytes(data, key.occupied_size)
+                    if folder.folder_id == file_id:
+                        return {
+                            'id': folder.folder_id,
+                            'name': key.node_name,
+                            'create_date': folder.create_date,
+                            'mod_date': folder.content_mod_date,
+                            'owner_id': folder.get_owner_id(),
+                            'group_id': folder.get_group_id(),
+                            'mode': folder.get_file_mode(),
+                        }
+        
+        return None
+
+
+def open_volume(source: Union[str, BinaryIO], 
+                volume_offset: int = 0) -> HFSPlusVolume:
+    """
+    打开 HFS+ 卷的便捷函数
+    
+    Args:
+        source: 文件路径或已打开的文件对象
+        volume_offset: 卷在文件中的偏移量
+    
+    Returns:
+        HFSPlusVolume 对象
+    """
+    return HFSPlusVolume(source, volume_offset)

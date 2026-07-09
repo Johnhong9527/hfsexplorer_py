@@ -5,6 +5,7 @@ HFS+ B-tree 模块
 """
 
 import struct
+import unicodedata
 from enum import IntEnum
 from dataclasses import dataclass, field
 from typing import List, Optional, Callable, BinaryIO
@@ -14,6 +15,166 @@ from .constants import (
     BTREE_NODE_DESCRIPTOR_SIZE,
     BTREE_HEADER_RECORD_SIZE,
 )
+
+
+# =============================================================================
+# HFS+ Unicode 比较
+# =============================================================================
+
+def _hfs_fold_char(ch: str) -> str:
+    """单个字符的 HFS+ 大小写折叠
+    
+    HFS+ 使用完全分解的 Unicode，大小写不敏感比较。
+    简化实现：使用 Unicode casefold + NFD 分解。
+    """
+    # 分解 + casefold
+    folded = unicodedata.normalize('NFD', ch).casefold()
+    return folded
+
+
+def hfs_unicode_compare(str1: str, str2: str) -> int:
+    """
+    HFS+ Unicode 大小写不敏感比较
+    
+    按 TN1150 规范：
+    - 字符串必须完全分解 (NFD)
+    - 大小写不敏感比较
+    - 忽略特定 Unicode 格式字符
+    
+    返回: -1 (str1 < str2), 0 (相等), 1 (str1 > str2)
+    """
+    # NFD 分解
+    s1 = unicodedata.normalize('NFD', str1)
+    s2 = unicodedata.normalize('NFD', str2)
+    
+    # 忽略的字符 (Unicode 格式字符)
+    IGNORE_CHARS = frozenset([
+        '\u00AD',  # SOFT HYPHEN
+        '\u034F',  # COMBINING GRAPHEME JOINER
+        '\u1806',  # MONGOLIAN TODO SOFT HYPHEN
+        '\u180B',  # MONGOLIAN FREE VARIATION SELECTOR ONE
+        '\u180C',  # MONGOLIAN FREE VARIATION SELECTOR TWO
+        '\u180D',  # MONGOLIAN FREE VARIATION SELECTOR THREE
+        '\u200B',  # ZERO WIDTH SPACE
+        '\u200C',  # ZERO WIDTH NON-JOINER
+        '\u200D',  # ZERO WIDTH JOINER
+        '\u200E',  # LEFT-TO-RIGHT MARK
+        '\u200F',  # RIGHT-TO-LEFT MARK
+        '\u202A',  # LEFT-TO-RIGHT EMBEDDING
+        '\u202B',  # RIGHT-TO-LEFT EMBEDDING
+        '\u202C',  # POP DIRECTIONAL FORMATTING
+        '\u202D',  # LEFT-TO-RIGHT OVERRIDE
+        '\u202E',  # RIGHT-TO-LEFT OVERRIDE
+        '\u2060',  # WORD JOINER
+        '\u2061',  # FUNCTION APPLICATION
+        '\u2062',  # INVISIBLE TIMES
+        '\u2063',  # INVISIBLE SEPARATOR
+        '\u2064',  # INVISIBLE PLUS
+        '\uFEFF',  # ZERO WIDTH NO-BREAK SPACE
+    ])
+    
+    i, j = 0, 0
+    len1, len2 = len(s1), len(s2)
+    
+    while True:
+        # 获取 str1 的下一个有效字符
+        c1 = '\0'
+        while i < len1:
+            ch = _hfs_fold_char(s1[i])
+            i += 1
+            if ch and ch not in IGNORE_CHARS and ch != '\0':
+                c1 = ch[0]  # 取第一个字符（casefold 可能产生多字符）
+                break
+        
+        # 获取 str2 的下一个有效字符
+        c2 = '\0'
+        while j < len2:
+            ch = _hfs_fold_char(s2[j])
+            j += 1
+            if ch and ch not in IGNORE_CHARS and ch != '\0':
+                c2 = ch[0]
+                break
+        
+        # 比较
+        if c1 != c2:
+            if c1 < c2:
+                return -1
+            else:
+                return 1
+        
+        # 都到达末尾
+        if c1 == '\0':
+            return 0
+
+
+def compare_catalog_keys(key1_data: bytes, key2_data: bytes) -> int:
+    """
+    比较两个 Catalog key 的原始字节数据
+    
+    比较规则 (TN1150):
+    1. 先比较 parentID (UInt32, big-endian)
+    2. 再比较 nodeName (HFSUniStr255, case-insensitive)
+    
+    Args:
+        key1_data: 第一个 key 的原始数据 (含 keyLength)
+        key2_data: 第二个 key 的原始数据 (含 keyLength)
+    
+    返回: -1, 0, 1
+    """
+    # 提取 parentID (offset 2, 4 bytes)
+    parent1 = struct.unpack_from('>I', key1_data, 2)[0]
+    parent2 = struct.unpack_from('>I', key2_data, 2)[0]
+    
+    if parent1 < parent2:
+        return -1
+    if parent1 > parent2:
+        return 1
+    
+    # parentID 相同，比较 nodeName
+    # HFSUniStr255: length (2 bytes) + unicode chars
+    name1_len = struct.unpack_from('>H', key1_data, 6)[0]
+    name2_len = struct.unpack_from('>H', key2_data, 6)[0]
+    
+    name1 = key1_data[8:8 + name1_len * 2].decode('utf-16-be', errors='replace')
+    name2 = key2_data[8:8 + name2_len * 2].decode('utf-16-be', errors='replace')
+    
+    return hfs_unicode_compare(name1, name2)
+
+
+def compare_extent_keys(key1_data: bytes, key2_data: bytes) -> int:
+    """
+    比较两个 Extent key 的原始字节数据
+    
+    比较规则 (TN1150):
+    1. forkType (UInt8)
+    2. fileID (UInt32)
+    3. startBlock (UInt32)
+    """
+    # forkType at offset 2
+    fork1 = key1_data[2]
+    fork2 = key2_data[2]
+    if fork1 < fork2:
+        return -1
+    if fork1 > fork2:
+        return 1
+    
+    # fileID at offset 4
+    file1 = struct.unpack_from('>I', key1_data, 4)[0]
+    file2 = struct.unpack_from('>I', key2_data, 4)[0]
+    if file1 < file2:
+        return -1
+    if file1 > file2:
+        return 1
+    
+    # startBlock at offset 8
+    block1 = struct.unpack_from('>I', key1_data, 8)[0]
+    block2 = struct.unpack_from('>I', key2_data, 8)[0]
+    if block1 < block2:
+        return -1
+    if block1 > block2:
+        return 1
+    
+    return 0
 
 
 # =============================================================================
@@ -391,7 +552,8 @@ class BTreeFile:
     """
     
     def __init__(self, stream: BinaryIO, start_offset: int = 0,
-                 node_size: int = 4096, parse_key_fn: Optional[Callable] = None):
+                 node_size: int = 4096, parse_key_fn: Optional[Callable] = None,
+                 compare_fn: Optional[Callable] = None):
         """
         初始化 B-tree 文件读取器
         
@@ -400,11 +562,13 @@ class BTreeFile:
             start_offset: B-tree 数据在流中的起始偏移量
             node_size: 节点大小（字节），默认 4096
             parse_key_fn: 可选的键解析函数
+            compare_fn: 键比较函数 (key1_data, key2_data) -> int
         """
         self.stream = stream
         self.start_offset = start_offset
         self._node_size = node_size
         self.parse_key_fn = parse_key_fn
+        self.compare_fn = compare_fn
         self._header: Optional[BTHeaderRec] = None
     
     @property
@@ -488,6 +652,20 @@ class BTreeFile:
         
         return records
     
+    def _compare_keys(self, key1: bytes, key2: bytes) -> int:
+        """比较两个键
+        
+        使用 compare_fn（如果提供），否则回退到字节比较。
+        """
+        if self.compare_fn:
+            return self.compare_fn(key1, key2)
+        # 回退：字节比较
+        if key1 < key2:
+            return -1
+        elif key1 > key2:
+            return 1
+        return 0
+    
     def find_record(self, search_key_data: bytes) -> Optional[BTLeafRecord]:
         """
         查找匹配的叶记录
@@ -526,7 +704,7 @@ class BTreeFile:
                 key_length = struct.unpack_from('>H', data, 0)[0]
                 key_data = data[:2 + key_length]
                 
-                if key_data == search_key_data:
+                if self._compare_keys(key_data, search_key_data) == 0:
                     record_data = data[2 + key_length:]
                     return BTLeafRecord(
                         key_data=key_data,
@@ -570,8 +748,8 @@ class BTreeFile:
             )
             
             # 如果键 <= 搜索键
-            if key_data <= search_key_data:
-                if best is None or key_data > best.key_data:
+            if self._compare_keys(key_data, search_key_data) <= 0:
+                if best is None or self._compare_keys(key_data, best.key_data) > 0:
                     best = record
         
         return best
@@ -1043,24 +1221,26 @@ class ExtentsBTree(BTreeFile):
     
     def __init__(self, stream: BinaryIO, start_offset: int = 0,
                  node_size: int = 4096):
-        super().__init__(stream, start_offset, node_size)
+        super().__init__(stream, start_offset, node_size, compare_fn=compare_extent_keys)
     
-    def get_extents(self, file_id: int, fork_type: int,
-                    start_block: int) -> List[HFSPlusExtentDescriptor]:
+    def get_extents_for_fork(self, file_id: int, fork_type: int) -> List[HFSPlusExtentDescriptor]:
         """
-        获取文件的 extent 列表
+        获取文件某个 fork 的所有 overflow extents
+        
+        Extents B-tree 中的记录按键 (forkType, fileID, startBlock) 排序。
+        一个文件可能有多个 extent 记录（每个最多 8 个 extent）。
         
         Args:
             file_id: 文件 CNID
             fork_type: Fork 类型 (0=数据, 0xFF=资源)
-            start_block: 起始分配块号
         
         Returns:
-            Extent 描述符列表
+            所有 overflow extent 描述符列表
         """
         extents = []
         
-        # 遍历所有叶记录
+        # 遍历所有叶记录，查找匹配的 file_id 和 fork_type
+        # 由于按键排序，同一文件的记录是连续的
         for node in self.list_leaf_nodes():
             for i in range(node.num_records):
                 data = node.get_record_data(i)
@@ -1068,24 +1248,39 @@ class ExtentsBTree(BTreeFile):
                 # 解析键
                 key = HFSPlusExtentKey.from_bytes(data)
                 
+                # 如果 file_id 已经大于目标，可以提前退出
+                if key.file_id > file_id:
+                    return extents
+                
                 # 检查是否匹配
-                if (key.file_id == file_id and
-                    key.fork_type == fork_type and
-                    key.start_block == start_block):
-                    
-                    # 解析 extent 记录
+                if key.file_id == file_id and key.fork_type == fork_type:
+                    # 解析 extent 记录（8 个 extent 描述符，64 字节）
                     record = HFSPlusExtentRecord.from_bytes(data, key.occupied_size)
                     extents.extend(record.extents)
-                    
-                    # 检查是否需要继续查找下一个 extent
-                    if len(record.extents) == 8:
-                        # 可能有更多 extent，继续查找
-                        next_start_block = record.extents[-1].end_block
-                        extents.extend(
-                            self.get_extents(file_id, fork_type, next_start_block)
-                        )
         
         return extents
+    
+    def get_all_extents(self, file_id: int, fork_type: int,
+                        initial_extents: List[HFSPlusExtentDescriptor]) -> List[HFSPlusExtentDescriptor]:
+        """
+        获取文件的完整 extent 列表（初始 + overflow）
+        
+        Args:
+            file_id: 文件 CNID
+            fork_type: Fork 类型 (0=数据, 0xFF=资源)
+            initial_extents: 来自 catalog 记录的初始 8 个 extent
+        
+        Returns:
+            完整的 extent 描述符列表
+        """
+        all_extents = list(initial_extents)
+        
+        # 只有当初始 extents 满 8 个时，才需要查找 overflow
+        if len(initial_extents) >= 8:
+            overflow = self.get_extents_for_fork(file_id, fork_type)
+            all_extents.extend(overflow)
+        
+        return all_extents
 
 
 # =============================================================================
@@ -1101,7 +1296,7 @@ class CatalogBTree(BTreeFile):
     
     def __init__(self, stream: BinaryIO, start_offset: int = 0,
                  node_size: int = 4096):
-        super().__init__(stream, start_offset, node_size)
+        super().__init__(stream, start_offset, node_size, compare_fn=compare_catalog_keys)
     
     def parse_catalog_key(self, data: bytes, offset: int = 0) -> HFSPlusCatalogKey:
         """解析 Catalog 键"""
@@ -1166,9 +1361,10 @@ class HFSPlusFileReader:
     HFS+ 文件读取器
     
     用于读取文件的数据分支和资源分支。
+    支持初始 extents (catalog 记录中) 和 overflow extents (extents B-tree 中)。
     
     Usage:
-        reader = HFSPlusFileReader(stream, catalog_btree, extents_btree)
+        reader = HFSPlusFileReader(stream, catalog_btree, extents_btree, block_size=4096)
         data = reader.read_data_fork(file_id)
     """
     
@@ -1205,20 +1401,101 @@ class HFSPlusFileReader:
         if file_record is None:
             raise FileNotFoundError(f"文件未找到: {file_id}")
         
-        # 获取内联 extent
-        # 注意：这里简化了实现，实际需要从 Catalog 记录中读取 extent
-        # 目前只支持读取内联 extent（8 个以内）
+        # 获取文件大小
+        file_size = file_record.get_data_fork_size()
+        if file_size == 0:
+            return b''
+        
+        # 获取初始 extents（来自 catalog 记录的 data_fork 字段）
+        initial_extents = file_record.get_data_fork_extents()
+        
+        # 转换为 HFSPlusExtentDescriptor 对象
+        extent_descs = []
+        for start_block, block_count in initial_extents:
+            if block_count > 0:
+                extent_descs.append(HFSPlusExtentDescriptor(start_block, block_count))
+        
+        # 获取所有 extents（包括 overflow）
+        all_extents = self.extents_btree.get_all_extents(
+            file_id, ForkType.DATA, extent_descs
+        )
         
         # 读取数据
-        data = b''
-        
-        # 遍历所有 extent
-        # 注意：这里需要实现完整的 extent 读取逻辑
-        # 目前只是一个框架
-        
-        return data
+        return self._read_extents(all_extents, file_size)
     
-    def _find_file_record(self, file_id: int):
+    def read_resource_fork(self, file_id: int) -> bytes:
+        """
+        读取文件的资源分支
+        
+        Args:
+            file_id: 文件 CNID
+        
+        Returns:
+            资源分支数据
+        """
+        # 查找文件记录
+        file_record = self._find_file_record(file_id)
+        if file_record is None:
+            raise FileNotFoundError(f"文件未找到: {file_id}")
+        
+        # 获取资源分支大小
+        fork_size = file_record.get_resource_fork_size()
+        if fork_size == 0:
+            return b''
+        
+        # 获取初始 extents（来自 catalog 记录的 resource_fork 字段）
+        # resource_fork 在 file_record 中的偏移是 152 (72 + 80)
+        resource_fork_data = file_record.resource_fork
+        initial_extents = []
+        for i in range(8):
+            start_block, block_count = struct.unpack_from('>II', resource_fork_data, 16 + i * 8)
+            if block_count > 0:
+                initial_extents.append(HFSPlusExtentDescriptor(start_block, block_count))
+        
+        # 获取所有 extents（包括 overflow）
+        all_extents = self.extents_btree.get_all_extents(
+            file_id, ForkType.RESOURCE, initial_extents
+        )
+        
+        # 读取数据
+        return self._read_extents(all_extents, fork_size)
+    
+    def _read_extents(self, extents: List[HFSPlusExtentDescriptor], 
+                      max_size: int) -> bytes:
+        """
+        从 extent 列表读取数据
+        
+        Args:
+            extents: extent 描述符列表
+            max_size: 最大读取字节数
+        
+        Returns:
+            读取的数据
+        """
+        data = bytearray()
+        bytes_remaining = max_size
+        
+        for ext in extents:
+            if bytes_remaining <= 0:
+                break
+            
+            # 计算这个 extent 要读取的字节数
+            ext_bytes = ext.block_count * self.block_size
+            read_bytes = min(ext_bytes, bytes_remaining)
+            
+            # 定位到 extent 的起始位置
+            byte_offset = ext.start_block * self.block_size
+            self.stream.seek(byte_offset)
+            
+            # 读取数据
+            chunk = self.stream.read(read_bytes)
+            data.extend(chunk)
+            
+            bytes_remaining -= len(chunk)
+        
+        return bytes(data)
+    
+    def _find_file_record(self, file_id: int) -> Optional[HFSPlusCatalogFile]:
         """查找文件记录"""
         # 遍历所有叶记录
         for node in self.catalog_btree.list_leaf_nodes():
