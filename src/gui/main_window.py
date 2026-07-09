@@ -459,6 +459,8 @@ class MainWindow(QMainWindow):
         dialog = DeviceSelectionDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             device_path = dialog.get_selected_device()
+            partition_offset = dialog.get_partition_offset()
+            
             if device_path:
                 # 检查权限
                 import os
@@ -493,6 +495,11 @@ class MainWindow(QMainWindow):
                             f"sudo python3 main.py"
                         )
                         return
+                
+                # 如果已经有分区偏移，直接加载
+                if partition_offset > 0:
+                    self._load_filesystem_with_offset(device_path, partition_offset)
+                    return
                 
                 # 检测设备上的分区
                 try:

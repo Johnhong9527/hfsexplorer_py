@@ -260,6 +260,22 @@ class DeviceSelectionDialog(QDialog):
         device_group = QGroupBox("选择设备")
         device_layout = QVBoxLayout(device_group)
         
+        # 自动检测按钮
+        autodetect_layout = QHBoxLayout()
+        autodetect_button = QPushButton("自动检测...")
+        autodetect_button.clicked.connect(self._autodetect_hfs)
+        autodetect_layout.addWidget(autodetect_button)
+        autodetect_label = QLabel("自动检测系统中的 HFS/HFS+/HFSX 分区")
+        autodetect_layout.addWidget(autodetect_label)
+        autodetect_layout.addStretch()
+        device_layout.addLayout(autodetect_layout)
+        
+        # 分隔线
+        line1 = QLabel()
+        line1.setFrameShape(QLabel.Shape.HLine)
+        line1.setFrameShadow(QLabel.Shadow.Sunken)
+        device_layout.addWidget(line1)
+        
         # 自动检测的设备
         self.auto_radio = QRadioButton("从检测到的设备中选择:")
         self.auto_radio.setChecked(True)
@@ -270,6 +286,11 @@ class DeviceSelectionDialog(QDialog):
         self.device_list.setMinimumHeight(150)
         device_layout.addWidget(self.device_list)
         
+        # 警告标签
+        warning_label = QLabel("(混合 CD-ROM 同时包含 HFS/+/X 和 ISO 文件系统将无法工作)")
+        warning_label.setStyleSheet("color: gray; font-style: italic;")
+        device_layout.addWidget(warning_label)
+        
         # 刷新按钮
         refresh_layout = QHBoxLayout()
         refresh_button = QPushButton("刷新设备列表")
@@ -278,13 +299,19 @@ class DeviceSelectionDialog(QDialog):
         refresh_layout.addStretch()
         device_layout.addLayout(refresh_layout)
         
+        # 分隔线
+        line2 = QLabel()
+        line2.setFrameShape(QLabel.Shape.HLine)
+        line2.setFrameShadow(QLabel.Shadow.Sunken)
+        device_layout.addWidget(line2)
+        
         # 手动输入
-        self.manual_radio = QRadioButton("手动指定设备路径:")
+        self.manual_radio = QRadioButton("指定设备名称:")
         device_layout.addWidget(self.manual_radio)
         
         manual_layout = QHBoxLayout()
         self.path_edit = QLineEdit()
-        self.path_edit.setPlaceholderText("例如: /dev/sda 或 \\\\.\\PhysicalDrive0")
+        self.path_edit.setPlaceholderText("例如: \\\\.\\PhysicalDrive0 或 /dev/sda")
         self.path_edit.setEnabled(False)
         manual_layout.addWidget(self.path_edit)
         device_layout.addLayout(manual_layout)
@@ -333,6 +360,84 @@ class DeviceSelectionDialog(QDialog):
         if self._devices:
             self.device_list.setCurrentRow(0)
     
+    def _autodetect_hfs(self):
+        """自动检测 HFS/HFS+/HFSX 分区"""
+        from src.core.partition import parse_partitions
+        
+        self.device_list.clear()
+        self._devices = []
+        
+        # 检测所有设备
+        all_devices = detect_devices()
+        hfs_devices = []
+        
+        progress = QMessageBox(self)
+        progress.setWindowTitle("自动检测")
+        progress.setText("正在扫描设备...")
+        progress.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        progress.show()
+        
+        for device in all_devices:
+            # 跳过分区，只扫描整盘
+            if device.path[-1].isdigit():
+                continue
+            
+            try:
+                progress.setText(f"正在扫描: {device.name}")
+                QApplication.processEvents()
+                
+                with open(device.path, 'rb') as f:
+                    partition_type, partitions = parse_partitions(f)
+                    
+                    if partitions:
+                        for p in partitions:
+                            if p.is_hfs:
+                                # 创建一个新的设备信息
+                                hfs_path = device.path
+                                # 计算分区偏移
+                                offset_mb = p.start_offset / (1024 * 1024)
+                                size_gb = p.size_bytes / (1024 * 1024 * 1024)
+                                
+                                name = f"{device.name} - {p.name} ({size_gb:.2f} GB, 偏移: {offset_mb:.1f} MB)"
+                                hfs_info = DeviceInfo(
+                                    device.path,
+                                    name,
+                                    p.size_bytes,
+                                    device.model,
+                                    device.is_usb
+                                )
+                                hfs_info.partition_offset = p.start_offset  # 保存分区偏移
+                                hfs_devices.append(hfs_info)
+            except Exception as e:
+                # 忽略无法访问的设备
+                pass
+        
+        progress.close()
+        
+        if not hfs_devices:
+            QMessageBox.information(
+                self, "自动检测",
+                "未检测到 HFS/HFS+/HFSX 分区。\n\n"
+                "可能的原因：\n"
+                "1. 没有连接 HFS+ 格式的硬盘\n"
+                "2. 需要管理员权限才能访问设备\n"
+                "3. 分区表格式不支持"
+            )
+            return
+        
+        # 添加到列表
+        self._devices = hfs_devices
+        for device in hfs_devices:
+            item = QListWidgetItem(str(device))
+            item.setData(Qt.ItemDataRole.UserRole, device)
+            self.device_list.addItem(item)
+        
+        self.device_list.setCurrentRow(0)
+        QMessageBox.information(
+            self, "自动检测",
+            f"检测到 {len(hfs_devices)} 个 HFS+ 分区"
+        )
+    
     def _on_radio_changed(self, checked: bool):
         """单选按钮状态改变"""
         self.device_list.setEnabled(checked)
@@ -349,6 +454,11 @@ class DeviceSelectionDialog(QDialog):
             
             device = current_item.data(Qt.ItemDataRole.UserRole)
             self._selected_device = device.path
+            # 保存分区偏移（如果有）
+            if hasattr(device, 'partition_offset'):
+                self._partition_offset = device.partition_offset
+            else:
+                self._partition_offset = 0
         else:
             # 手动输入
             path = self.path_edit.text().strip()
@@ -361,12 +471,17 @@ class DeviceSelectionDialog(QDialog):
                 return
             
             self._selected_device = path
+            self._partition_offset = 0
         
         self.accept()
     
     def get_selected_device(self) -> Optional[str]:
         """获取选中的设备路径"""
         return self._selected_device
+    
+    def get_partition_offset(self) -> int:
+        """获取分区偏移"""
+        return getattr(self, '_partition_offset', 0)
 
 
 def show_device_selection_dialog(parent=None) -> Optional[str]:
