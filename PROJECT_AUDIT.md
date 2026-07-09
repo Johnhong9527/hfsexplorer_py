@@ -61,7 +61,7 @@
 | 空模块 | `src/core/partition/__init__.py` | ✅ APM/GPT/MBR 解析 |
 | 无分区选择 | `src/gui/main_window.py` | ✅ 自动弹出选择对话框 |
 
-### 7. 写入功能 ✅ 框架已实现
+### 7. 写入功能 ✅ 已实现
 
 | 问题 | 修复位置 | 状态 |
 |------|----------|------|
@@ -71,6 +71,17 @@
 | 数据结构序列化 | `src/core/hfs/btree.py` | ✅ to_bytes 方法 |
 | BTNodeDescriptor.STRUCT_SIZE | `src/core/hfs/btree_mutator.py` | ✅ 改用 BTREE_NODE_DESCRIPTOR_SIZE |
 | bytes 不可变问题 | `src/core/hfs/btree_mutator.py` | ✅ 转换为 bytearray |
+
+### 8. GUI 增删改集成 ✅ 已实现
+
+| 功能 | 位置 | 状态 |
+|------|------|------|
+| 新建文件 | `src/gui/main_window.py` | ✅ Ctrl+N，右键菜单 |
+| 新建文件夹 | `src/gui/main_window.py` | ✅ Ctrl+Shift+N，右键菜单 |
+| 删除项目 | `src/gui/main_window.py` | ✅ 右键菜单，带确认对话框 |
+| 重命名项目 | `src/gui/main_window.py` | ✅ 右键菜单，输入新名称 |
+| 写入支持初始化 | `src/gui/main_window.py` | ✅ _init_write_support |
+| 资源清理 | `src/gui/main_window.py` | ✅ closeEvent |
 
 ### 8. 版本和文档 ✅ 已修复
 
@@ -106,7 +117,7 @@ with open("disk.img", "rb") as f:
     hfs_partitions = find_hfs_partitions(f)
 ```
 
-### 写入功能（框架）
+### 写入功能
 
 ```python
 from src.core.hfs.writer import CatalogWriter, AllocationBitmap
@@ -116,6 +127,14 @@ writer = CatalogWriter(catalog, volume_header, stream)
 file_id = writer.create_file(parent_id, "test.txt", data)
 folder_id = writer.create_folder(parent_id, "New Folder")
 ```
+
+### GUI 增删改功能
+
+打开 HFS+ 卷后，可通过以下方式操作：
+- **新建文件**：Ctrl+N 或右键菜单 → 新建 → 文件
+- **新建文件夹**：Ctrl+Shift+N 或右键菜单 → 新建 → 文件夹
+- **删除项目**：右键菜单 → 删除（带确认对话框）
+- **重命名项目**：右键菜单 → 重命名
 
 ---
 
@@ -138,6 +157,7 @@ folder_id = writer.create_folder(parent_id, "New Folder")
 - ✅ deb 包构建成功 (104K)
 - ✅ 核心模块导入成功
 - ✅ 写入功能基本验证通过（创建文件/文件夹）
+- ✅ GUI 增删改功能集成验证通过
 
 ---
 
@@ -151,6 +171,7 @@ folder_id = writer.create_folder(parent_id, "New Folder")
 | `8951140` | 2026-07-09 | 修复 view_manager.py QHeaderView 导入 |
 | `2455fe3` | 2026-07-09 | 实现 Catalog Thread、叶节点循环检测、分区表解析 |
 | `c817e5b` | 2026-07-09 | 修复写入功能、添加序列化方法、修复格式字符串 |
+| `b188434` | 2026-07-09 | 实现 GUI 增删改功能集成 |
 
 ---
 
