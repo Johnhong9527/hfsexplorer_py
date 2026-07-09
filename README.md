@@ -11,6 +11,7 @@
 - **HFS+/HFSX 读取**：浏览、搜索、提取文件
 - **分区表支持**：APM、GPT、MBR 自动检测和解析
 - **基础写入**：创建文件和文件夹（框架已实现并验证）
+- **格式化**：创建新的 HFS+ 文件系统
 - **访达体验**：类似 macOS Finder 的用户界面，支持多种视图模式
 - **加密框架**：FileVault 2 解密框架已搭建（密钥包解析不完整）
 
@@ -38,6 +39,16 @@ pip install -e .
 hfsexplorer
 ```
 
+### 命令行格式化
+
+```python
+from src.core.hfs.formatter import format_volume
+
+# 格式化为 HFS+
+header = format_volume("/path/to/volume.img", "MyVolume", 4096)
+print(f"总块数: {header.total_blocks}, 空闲块: {header.free_blocks}")
+```
+
 ## 功能实现状态
 
 ### ✅ 已实现
@@ -62,6 +73,7 @@ hfsexplorer
 | B-tree 变异引擎 | 节点插入、删除、分裂、合并 |
 | Catalog 写入器 | 创建文件/文件夹（已验证） |
 | 分配位图管理 | 空闲块查找和分配 |
+| **HFS+ 格式化** | 创建新的 HFS+ 文件系统 |
 | 打包构建 | PyInstaller、deb、AppImage |
 
 ### ⚠️ 框架已实现（未充分测试）

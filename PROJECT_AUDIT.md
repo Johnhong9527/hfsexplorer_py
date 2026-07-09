@@ -71,6 +71,7 @@
 | 数据结构序列化 | `src/core/hfs/btree.py` | ✅ to_bytes 方法 |
 | BTNodeDescriptor.STRUCT_SIZE | `src/core/hfs/btree_mutator.py` | ✅ 改用 BTREE_NODE_DESCRIPTOR_SIZE |
 | bytes 不可变问题 | `src/core/hfs/btree_mutator.py` | ✅ 转换为 bytearray |
+| HFS+ 格式化 | `src/core/hfs/formatter.py` | ✅ 创建新的 HFS+ 文件系统 |
 
 ### 8. GUI 增删改集成 ✅ 已实现
 

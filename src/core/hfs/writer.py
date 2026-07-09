@@ -256,7 +256,7 @@ class CatalogWriter:
         
         # 创建 Catalog 键
         key = HFSPlusCatalogKey(
-            key_length=4 + len(name.encode('utf-16-be')),
+            key_length=6 + len(name) * 2,
             parent_id=parent_id,
             node_name=name
         )
@@ -332,7 +332,7 @@ class CatalogWriter:
         
         # 创建 Catalog 键
         key = HFSPlusCatalogKey(
-            key_length=4 + len(name.encode('utf-16-be')),
+            key_length=6 + len(name) * 2,
             parent_id=parent_id,
             node_name=name
         )
@@ -390,7 +390,7 @@ class CatalogWriter:
         """
         # 创建 Catalog 键
         key = HFSPlusCatalogKey(
-            key_length=4 + len(name.encode('utf-16-be')),
+            key_length=6 + len(name) * 2,
             parent_id=parent_id,
             node_name=name
         )
@@ -417,7 +417,7 @@ class CatalogWriter:
         """
         # 查找旧记录
         old_key = HFSPlusCatalogKey(
-            key_length=4 + len(old_name.encode('utf-16-be')),
+            key_length=6 + len(old_name) * 2,
             parent_id=parent_id,
             node_name=old_name
         )
@@ -439,7 +439,7 @@ class CatalogWriter:
         
         # 创建新键
         new_key = HFSPlusCatalogKey(
-            key_length=4 + len(new_name.encode('utf-16-be')),
+            key_length=6 + len(new_name) * 2,
             parent_id=parent_id,
             node_name=new_name
         )
@@ -466,7 +466,7 @@ class CatalogWriter:
         """
         # 查找旧记录
         old_key = HFSPlusCatalogKey(
-            key_length=4 + len(old_name.encode('utf-16-be')),
+            key_length=6 + len(old_name) * 2,
             parent_id=old_parent_id,
             node_name=old_name
         )
@@ -488,7 +488,7 @@ class CatalogWriter:
         
         # 创建新键
         new_key = HFSPlusCatalogKey(
-            key_length=4 + len(new_name.encode('utf-16-be')),
+            key_length=6 + len(new_name) * 2,
             parent_id=new_parent_id,
             node_name=new_name
         )

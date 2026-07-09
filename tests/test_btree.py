@@ -241,14 +241,18 @@ class TestBTreeNode:
             records_data += b'\x00' * padding
         
         # 偏移表（从末尾反向存储）
-        # 根据 from_bytes 的实现，偏移表存储在节点末尾，反向排列
-        # offsets[0] 存储在 node_size - (num_records+1)*2 的位置
-        # offsets[num_records] 存储在 node_size - 2 的位置
+        # 根据 from_bytes 的实现，偏移表存储在节点末尾，按以下顺序：
+        # offsets[0] 在 node_size - 2
+        # offsets[1] 在 node_size - 4
+        # ...
+        # offsets[numRecords] 在 node_size - (numRecords+1)*2
         offset_table = b''
         for i in range(num_records + 1):
-            # 计算存储位置
-            pos = node_size - (num_records + 1 - i) * 2
-            offset_table += struct.pack('>H', offsets[i])
+            # 按照 from_bytes 的读取顺序写入：
+            # i=0 -> node_size - 2
+            # i=1 -> node_size - 4
+            # ...
+            offset_table = struct.pack('>H', offsets[num_records - i]) + offset_table
         
         return desc_data + records_data + offset_table
     

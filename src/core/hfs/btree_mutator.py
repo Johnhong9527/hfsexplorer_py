@@ -318,22 +318,36 @@ class BTreeMutator:
         record_size = len(full_record)
         
         # 计算插入偏移量
-        if index < len(node.offsets):
+        if index < len(node.offsets) - 1:
             insert_offset = node.offsets[index]
         else:
             insert_offset = node.offsets[-1]
         
-        # 移动现有数据
-        # 注意：这里简化了实现，实际需要更复杂的数据移动
+        # 移动现有数据（从插入位置开始的所有数据向后移动）
+        free_space_start = node.offsets[-1]
+        if insert_offset < free_space_start:
+            # 移动数据
+            node.raw_data[insert_offset + record_size:free_space_start + record_size] = \
+                node.raw_data[insert_offset:free_space_start]
         
         # 插入新记录
         node.raw_data[insert_offset:insert_offset + record_size] = full_record
         
-        # 更新偏移表
-        # 注意：这里简化了实现，实际需要更新所有后续偏移
+        # 更新偏移表（插入位置及之后的所有偏移都需要调整）
+        # 1. 在偏移表中插入新记录的偏移
+        node.offsets.insert(index, insert_offset)
+        # 2. 更新插入位置之后的所有偏移
+        for i in range(index + 1, len(node.offsets)):
+            node.offsets[i] += record_size
         
         # 更新记录数
         node.descriptor.numRecords += 1
+        
+        # 更新节点末尾的偏移表
+        num_offsets = len(node.offsets)
+        for i, offset_val in enumerate(node.offsets):
+            pos = node.node_size - (num_offsets - i) * 2
+            struct.pack_into('>H', node.raw_data, pos, offset_val)
     
     def _delete_from_node(self, node: BTreeNode, index: int):
         """
@@ -1001,12 +1015,19 @@ class BTreeMutator:
         Args:
             node: 节点
         """
-        # 计算节点在文件中的偏移量
-        # B-tree 数据从 header 偏移开始，第一个节点是 header 节点
-        node_number = node.descriptor.fLink  # fLink 存储节点号
+        # 使用节点号计算偏移量
+        node_number = node.node_number
+        if node_number < 0:
+            raise ValueError(f"节点号未设置: {node_number}")
+        
+        # 确保 raw_data 是 bytearray
+        if not isinstance(node.raw_data, bytearray):
+            node.raw_data = bytearray(node.raw_data)
+        
+        # 将节点描述符更新到 raw_data 开头
+        node.raw_data[0:BTREE_NODE_DESCRIPTOR_SIZE] = node.descriptor.to_bytes()
         
         # 计算偏移量：B-tree 起始偏移 + 节点号 * 节点大小
-        # 注意：节点 0 是 header 节点，实际数据从节点 1 开始
         offset = self.btree.start_offset + node_number * self.node_size
         
         # 写入节点数据

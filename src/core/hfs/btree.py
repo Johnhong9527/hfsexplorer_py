@@ -427,11 +427,13 @@ class BTreeNode:
         node_size: 节点大小
         offsets: 记录偏移表（包含 numRecords + 1 个条目）
         raw_data: 原始节点数据
+        node_number: 节点号（在文件中的位置索引）
     """
     descriptor: BTNodeDescriptor
     node_size: int
     offsets: List[int]
     raw_data: bytes
+    node_number: int = -1  # 节点号，默认 -1 表示未设置
     
     @property
     def num_records(self) -> int:
@@ -470,8 +472,10 @@ class BTreeNode:
         num_records = descriptor.numRecords
         offsets = []
         
-        # 偏移表存储在节点末尾，反向排列
-        # 有 numRecords + 1 个条目（最后一个指向空闲空间）
+        # 偏移表存储在节点末尾，按 HFS+ 规范：
+        # offsets[0] 在 node_size - (numRecords+1)*2
+        # offsets[numRecords] 在 node_size - 2
+        # 读取后顺序已经是正确的（索引 0 = 第一个记录）
         for i in range(num_records + 1):
             off = struct.unpack_from(
                 '>H', data, offset + node_size - ((i + 1) * 2)
@@ -479,6 +483,7 @@ class BTreeNode:
             offsets.append(off)
         
         # 反转，使索引 0 = 第一个记录的偏移
+        # 按照 HFS+ 规范，偏移表从节点末尾开始存储，第一个记录在最后
         offsets.reverse()
         
         return cls(
@@ -599,7 +604,9 @@ class BTreeFile:
         if len(data) < self.node_size:
             raise IOError(f"读取不足: 期望 {self.node_size}, 实际 {len(data)}")
         
-        return BTreeNode.from_bytes(data)
+        node = BTreeNode.from_bytes(data)
+        node.node_number = node_number  # 设置节点号
+        return node
     
     def get_node(self, node_number: int) -> BTreeNode:
         """获取指定节点"""
@@ -1021,6 +1028,19 @@ class HFSPlusCatalogThread:
     def is_file_thread(self) -> bool:
         """是否为文件线程记录"""
         return self.record_type == CatalogRecordType.FILE_THREAD
+    
+    def to_bytes(self) -> bytes:
+        """转换为字节序列"""
+        # 编码节点名称为 UTF-16BE
+        name_bytes = self.node_name.encode('utf-16-be') if self.node_name else b''
+        name_length = len(self.node_name) if self.node_name else 0
+        
+        # 构造线程记录
+        result = struct.pack('>HHI', self.record_type, self.reserved, self.parent_id)
+        result += struct.pack('>H', name_length)
+        result += name_bytes
+        
+        return result
 
 
 @dataclass
