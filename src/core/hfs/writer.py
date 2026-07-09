@@ -261,23 +261,50 @@ class CatalogWriter:
             node_name=name
         )
         
+        # 构造 BSD 权限 (16 字节)
+        # ownerID(4) + groupID(4) + adminFlags(1) + ownerFlags(1) + fileMode(2) + special(4)
+        permissions = struct.pack('>II', 0, 0)  # ownerID, groupID
+        permissions += struct.pack('>BB', 0, 0)  # adminFlags, ownerFlags
+        permissions += struct.pack('>H', 0o100644)  # fileMode (普通文件)
+        permissions += struct.pack('>I', 0)  # special
+        
+        # 构造 Finder 信息 (8 字节)
+        userInfo = b'\x00' * 8
+        
+        # 构造 ExtendedFileInfo (8 字节)
+        finderInfo = b'\x00' * 8
+        
+        # 构造数据分支 (80 字节)
+        # logicalSize(8) + clumpSize(4) + totalBlocks(4) + extents(64)
+        data_fork = struct.pack('>Q', len(data))  # logicalSize
+        data_fork += struct.pack('>I', 0)  # clumpSize
+        data_fork += struct.pack('>I', 0)  # totalBlocks
+        data_fork += b'\x00' * 64  # 8 个 extent 描述符
+        
+        # 构造资源分支 (80 字节)
+        resource_fork = struct.pack('>Q', 0)  # logicalSize
+        resource_fork += struct.pack('>I', 0)  # clumpSize
+        resource_fork += struct.pack('>I', 0)  # totalBlocks
+        resource_fork += b'\x00' * 64  # 8 个 extent 描述符
+        
         # 创建文件记录
         file_record = HFSPlusCatalogFile(
             record_type=CatalogRecordType.FILE,
             flags=0,
+            reserved1=0,
             file_id=file_id,
             create_date=self._get_current_date(),
             content_mod_date=self._get_current_date(),
             attribute_mod_date=self._get_current_date(),
             access_date=self._get_current_date(),
             backup_date=0,
-            owner_id=0,
-            group_id=0,
-            admin_flags=0,
-            owner_flags=0,
-            file_mode=0o100644,  # 普通文件
-            data_fork_size=len(data),
-            data_fork_blocks=0
+            permissions=permissions,
+            userInfo=userInfo,
+            finderInfo=finderInfo,
+            text_encoding=0,
+            reserved2=0,
+            data_fork=data_fork,
+            resource_fork=resource_fork
         )
         
         # 序列化键和记录
@@ -310,6 +337,19 @@ class CatalogWriter:
             node_name=name
         )
         
+        # 构造 BSD 权限 (16 字节)
+        # ownerID(4) + groupID(4) + adminFlags(1) + ownerFlags(1) + fileMode(2) + special(4)
+        permissions = struct.pack('>II', 0, 0)  # ownerID, groupID
+        permissions += struct.pack('>BB', 0, 0)  # adminFlags, ownerFlags
+        permissions += struct.pack('>H', 0o40755)  # fileMode (目录)
+        permissions += struct.pack('>I', 0)  # special
+        
+        # 构造 FolderInfo (8 字节)
+        userInfo = b'\x00' * 8
+        
+        # 构造 ExtendedFolderInfo (8 字节)
+        finderInfo = b'\x00' * 8
+        
         # 创建文件夹记录
         folder_record = HFSPlusCatalogFolder(
             record_type=CatalogRecordType.FOLDER,
@@ -321,11 +361,11 @@ class CatalogWriter:
             attribute_mod_date=self._get_current_date(),
             access_date=self._get_current_date(),
             backup_date=0,
-            owner_id=0,
-            group_id=0,
-            admin_flags=0,
-            owner_flags=0,
-            file_mode=0o40755  # 目录
+            permissions=permissions,
+            userInfo=userInfo,
+            finderInfo=finderInfo,
+            text_encoding=0,
+            reserved=0
         )
         
         # 序列化键和记录

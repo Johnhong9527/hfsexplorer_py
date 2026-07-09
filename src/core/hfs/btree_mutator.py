@@ -16,7 +16,7 @@ from .btree import (
     BTIndexRecord,
     BTLeafRecord,
 )
-from .constants import BTreeNodeKind
+from .constants import BTreeNodeKind, BTREE_NODE_DESCRIPTOR_SIZE
 
 
 class BTreeMutationError(Exception):
@@ -289,7 +289,7 @@ class BTreeMutator:
         """
         # 计算空闲空间
         if node.num_records == 0:
-            free_space = self.node_size - BTNodeDescriptor.STRUCT_SIZE - 2  # 2 for offset table
+            free_space = self.node_size - BTREE_NODE_DESCRIPTOR_SIZE - 2  # 2 for offset table
         else:
             last_offset = node.offsets[-1]
             offset_table_size = (node.num_records + 1) * 2
@@ -309,6 +309,10 @@ class BTreeMutator:
             key_data: 键数据
             record_data: 记录数据
         """
+        # 确保 raw_data 是可变的 bytearray
+        if not isinstance(node.raw_data, bytearray):
+            node.raw_data = bytearray(node.raw_data)
+        
         # 构造完整记录
         full_record = key_data + record_data
         record_size = len(full_record)
@@ -339,6 +343,10 @@ class BTreeMutator:
             node: 节点
             index: 记录索引
         """
+        # 确保 raw_data 是可变的 bytearray
+        if not isinstance(node.raw_data, bytearray):
+            node.raw_data = bytearray(node.raw_data)
+        
         # 获取记录大小
         record_size = node.get_record_length(index)
         
@@ -450,7 +458,7 @@ class BTreeMutator:
         node.raw_data[:len(desc_data)] = desc_data
         
         # 写入记录
-        offset = BTNodeDescriptor.STRUCT_SIZE
+        offset = BTREE_NODE_DESCRIPTOR_SIZE
         offsets = []
         
         for record in records:
@@ -758,7 +766,7 @@ class BTreeMutator:
         
         # 检查是否超过节点大小
         # 需要空间：节点描述符 + 记录 + 偏移表
-        required_space = BTNodeDescriptor.STRUCT_SIZE + total_records_size + \
+        required_space = BTREE_NODE_DESCRIPTOR_SIZE + total_records_size + \
                         (node1.num_records + node2.num_records + 1) * 2
         
         return required_space <= self.node_size

@@ -822,6 +822,21 @@ class HFSPlusCatalogKey:
             node_name=node_name
         )
     
+    def to_bytes(self) -> bytes:
+        """转换为字节序列"""
+        # 编码名称
+        name_bytes = self.node_name.encode('utf-16-be')
+        name_length = len(self.node_name)
+        
+        # 构造键
+        # keyLength (2) + parentID (4) + nameLength (2) + name (name_length * 2)
+        result = struct.pack('>H', self.key_length)
+        result += struct.pack('>I', self.parent_id)
+        result += struct.pack('>H', name_length)
+        result += name_bytes
+        
+        return result
+    
     def __str__(self) -> str:
         return f"CatalogKey(parent={self.parent_id}, name='{self.node_name}')"
 
@@ -876,7 +891,7 @@ class HFSPlusCatalogFolder:
         FolderInfo userInfo (8 bytes), ExtendedFolderInfo finderInfo (8 bytes),
         UInt32 textEncoding, UInt32 reserved
         """
-        # 前 36 字节: recordType(2) + flags(2) + valence(4) + folderID(4) + 5 dates(20)
+        # 前 32 字节: recordType(2) + flags(2) + valence(4) + folderID(4) + 5 dates(20)
         (
             record_type,
             flags,
@@ -887,17 +902,17 @@ class HFSPlusCatalogFolder:
             attribute_mod_date,
             access_date,
             backup_date,
-        ) = struct.unpack_from('>HHI I IIII', data, offset)
+        ) = struct.unpack_from('>HHIIIIIII', data, offset)
         
         # HFSPlusBSDInfo (16 bytes): ownerID(4) + groupID(4) + adminFlags(1) + ownerFlags(1) + fileMode(2) + special(4)
-        permissions = bytes(data[offset + 36:offset + 52])
+        permissions = bytes(data[offset + 32:offset + 48])
         
         # FolderInfo (8 bytes) + ExtendedFolderInfo (8 bytes)
-        userInfo = bytes(data[offset + 52:offset + 60])
-        finderInfo = bytes(data[offset + 60:offset + 68])
+        userInfo = bytes(data[offset + 48:offset + 56])
+        finderInfo = bytes(data[offset + 56:offset + 64])
         
         # textEncoding (4 bytes) + reserved (4 bytes)
-        text_encoding, reserved = struct.unpack_from('>II', data, offset + 68)
+        text_encoding, reserved = struct.unpack_from('>II', data, offset + 64)
         
         return cls(
             record_type=record_type,
@@ -915,6 +930,34 @@ class HFSPlusCatalogFolder:
             text_encoding=text_encoding,
             reserved=reserved
         )
+    
+    def to_bytes(self) -> bytes:
+        """转换为字节序列"""
+        # 打包基本字段 (32 字节)
+        # recordType(2) + flags(2) + valence(4) + folderID(4) + 5 dates(20)
+        result = struct.pack('>HHIIIIIII',
+            self.record_type,
+            self.flags,
+            self.valence,
+            self.folder_id,
+            self.create_date,
+            self.content_mod_date,
+            self.attribute_mod_date,
+            self.access_date,
+            self.backup_date
+        )
+        
+        # 添加权限 (16 字节)
+        result += self.permissions
+        
+        # 添加 Finder 信息 (8 + 8 = 16 字节)
+        result += self.userInfo
+        result += self.finderInfo
+        
+        # 添加 textEncoding 和 reserved (8 字节)
+        result += struct.pack('>II', self.text_encoding, self.reserved)
+        
+        return result
     
     def get_owner_id(self) -> int:
         """获取所有者 ID"""
@@ -1049,7 +1092,7 @@ class HFSPlusCatalogFile:
             attribute_mod_date,
             access_date,
             backup_date,
-        ) = struct.unpack_from('>HHI I IIII', data, offset)
+        ) = struct.unpack_from('>HHIIIIIII', data, offset)
         
         # HFSPlusBSDInfo (16 bytes)
         permissions = bytes(data[offset + 32:offset + 48])
@@ -1117,6 +1160,39 @@ class HFSPlusCatalogFile:
     def get_file_mode(self) -> int:
         """获取文件模式"""
         return struct.unpack_from('>H', self.permissions, 10)[0]
+    
+    def to_bytes(self) -> bytes:
+        """转换为字节序列"""
+        # 打包基本字段 (32 字节)
+        result = struct.pack('>HHIIIIIII',
+            self.record_type,
+            self.flags,
+            self.reserved1,
+            self.file_id,
+            self.create_date,
+            self.content_mod_date,
+            self.attribute_mod_date,
+            self.access_date,
+            self.backup_date
+        )
+        
+        # 添加权限 (16 字节)
+        result += self.permissions
+        
+        # 添加 Finder 信息 (8 + 8 = 16 字节)
+        result += self.userInfo
+        result += self.finderInfo
+        
+        # 添加 textEncoding 和 reserved2 (8 字节)
+        result += struct.pack('>II', self.text_encoding, self.reserved2)
+        
+        # 添加数据分支 (80 字节)
+        result += self.data_fork
+        
+        # 添加资源分支 (80 字节)
+        result += self.resource_fork
+        
+        return result
 
 
 # =============================================================================

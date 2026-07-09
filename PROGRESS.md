@@ -24,9 +24,12 @@
 - [x] 路径构建（通过 CNID）
 - [x] 叶节点循环检测
 - [x] 分区表解析（APM、GPT、MBR）
+- [x] B-tree 变异引擎（插入、删除、分裂、合并）
+- [x] Catalog 写入器（创建/删除文件和文件夹）
+- [x] 分配位图管理
+- [x] CatalogKey.to_bytes / CatalogFolder.to_bytes / CatalogFile.to_bytes
 
 ### ⚠️ 框架已实现（未充分测试）
-- [ ] 文件创建、删除、重命名
 - [ ] FileVault 2 解密（密钥包解析不完整）
 
 ### ❌ 尚未实现
@@ -57,9 +60,9 @@
 
 ## 测试状态
 
-- **测试总数**：81 个
+- **测试总数**：106 个
 - **通过率**：100%
-- **新增测试**：14 个（分区表和 Catalog Thread）
+- **新增测试**：39 个（写入功能 + 分区表 + Catalog Thread）
 
 ---
 
