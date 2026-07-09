@@ -462,14 +462,37 @@ class MainWindow(QMainWindow):
             if device_path:
                 # 检查权限
                 import os
-                if not os.access(device_path, os.R_OK):
-                    QMessageBox.warning(
-                        self, "权限错误",
-                        f"无法读取设备: {device_path}\n\n"
-                        f"请使用 sudo 运行程序以访问物理设备:\n"
-                        f"sudo python3 main.py"
-                    )
-                    return
+                import platform
+                
+                # Windows 上需要管理员权限
+                if platform.system() == 'Windows':
+                    try:
+                        # 尝试打开设备测试权限
+                        with open(device_path, 'rb') as f:
+                            f.read(512)
+                    except PermissionError:
+                        QMessageBox.warning(
+                            self, "权限错误",
+                            f"无法读取设备: {device_path}\n\n"
+                            f"请以管理员身份运行程序:\n"
+                            f"1. 右键点击命令提示符或 PowerShell\n"
+                            f"2. 选择 '以管理员身份运行'\n"
+                            f"3. 然后运行 HFSExplorer"
+                        )
+                        return
+                    except Exception as e:
+                        QMessageBox.warning(self, "错误", f"无法访问设备: {e}")
+                        return
+                else:
+                    # Linux/macOS
+                    if not os.access(device_path, os.R_OK):
+                        QMessageBox.warning(
+                            self, "权限错误",
+                            f"无法读取设备: {device_path}\n\n"
+                            f"请使用 sudo 运行程序以访问物理设备:\n"
+                            f"sudo python3 main.py"
+                        )
+                        return
                 
                 self._load_filesystem(device_path)
     

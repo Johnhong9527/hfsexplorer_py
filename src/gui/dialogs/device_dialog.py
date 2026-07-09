@@ -106,11 +106,43 @@ def detect_devices() -> List[DeviceInfo]:
             devices.append(DeviceInfo(dev_path, name, size, model))
     
     elif system == "Windows":
-        # Windows: 检查 PhysicalDrive0, 1, 2...
-        for i in range(10):
-            dev_path = f"\\\\.\\PhysicalDrive{i}"
-            name = f"PhysicalDrive{i}"
-            devices.append(DeviceInfo(dev_path, name))
+        # Windows: 使用 wmic 获取磁盘信息
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['wmic', 'diskdrive', 'get', 'DeviceID,Size,Model,MediaType'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')[1:]  # 跳过标题行
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        # 解析设备ID
+                        device_id = None
+                        model = ''
+                        size = 0
+                        media_type = ''
+                        
+                        for j, part in enumerate(parts):
+                            if part.startswith('\\\\.\\'):
+                                device_id = part
+                            elif part.isdigit() and int(part) > 1000000:
+                                size = int(part)
+                        
+                        if device_id:
+                            # 获取完整模型名称
+                            model_parts = [p for p in parts if not p.startswith('\\\\.\\') and not p.isdigit()]
+                            model = ' '.join(model_parts[:-1]) if len(model_parts) > 1 else ''
+                            
+                            name = device_id.replace('\\\\\\\\.\\\\', '')
+                            devices.append(DeviceInfo(device_id, name, size, model))
+        except Exception:
+            # 备用方案：直接添加 PhysicalDrive
+            for i in range(10):
+                dev_path = f"\\\\.\\PhysicalDrive{i}"
+                name = f"PhysicalDrive{i}"
+                devices.append(DeviceInfo(dev_path, name))
     
     elif system == "Darwin":
         # macOS: 检查 /dev/disk0, 1, 2...
