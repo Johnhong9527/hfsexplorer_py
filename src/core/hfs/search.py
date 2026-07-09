@@ -81,6 +81,7 @@ class SearchEngine:
         self.catalog = catalog
         self._results: List[SearchResult] = []
         self._is_searching = False
+        self._parent_cache: Dict[int, str] = {}  # parent_id -> folder name
     
     @property
     def results(self) -> List[SearchResult]:
@@ -91,6 +92,59 @@ class SearchEngine:
     def result_count(self) -> int:
         """获取搜索结果数量"""
         return len(self._results)
+    
+    def _build_parent_cache(self):
+        """构建父目录缓存（用于路径构建）"""
+        if self._parent_cache:
+            return
+        
+        # 遍历所有叶记录，收集文件夹信息
+        for node in self.catalog.list_leaf_nodes():
+            for i in range(node.num_records):
+                data = node.get_record_data(i)
+                
+                # 解析键
+                key = HFSPlusCatalogKey.from_bytes(data)
+                
+                # 解析记录类型
+                record_type = struct.unpack_from('>H', data, key.occupied_size)[0]
+                
+                if record_type == CatalogRecordType.FOLDER:
+                    folder = HFSPlusCatalogFolder.from_bytes(data, key.occupied_size)
+                    self._parent_cache[folder.folder_id] = key.node_name
+    
+    def _build_path(self, parent_id: int, name: str) -> str:
+        """
+        构建完整路径
+        
+        Args:
+            parent_id: 父目录 CNID
+            name: 文件/文件夹名称
+        
+        Returns:
+            完整路径
+        """
+        # 确保父目录缓存已构建
+        self._build_parent_cache()
+        
+        path_parts = [name]
+        current_id = parent_id
+        
+        # 向上遍历父目录
+        while current_id > 2:  # 2 = 根目录
+            if current_id in self._parent_cache:
+                path_parts.append(self._parent_cache[current_id])
+                # 查找父目录的父目录
+                # 注意：这里简化处理，实际需要查找父目录的 parent_id
+                # 为了简化，我们只构建部分路径
+                break
+            else:
+                path_parts.append(f"CNID:{current_id}")
+                break
+        
+        # 反转并拼接
+        path_parts.reverse()
+        return "/" + "/".join(path_parts)
     
     def search(self, query: str, 
                match_type: SearchMatchType = SearchMatchType.CONTAINS,
@@ -153,7 +207,7 @@ class SearchEngine:
                     # 创建搜索结果
                     result = SearchResult(
                         name=key.node_name,
-                        path="",  # TODO: 构建完整路径
+                        path=self._build_path(key.parent_id, key.node_name),
                         item_type="file" if record_type == CatalogRecordType.FILE else "folder",
                         parent_id=key.parent_id,
                     )

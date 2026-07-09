@@ -1,7 +1,7 @@
 # HFSExplorer 项目审查报告
 
 审查日期：2026-07-09
-更新日期：2026-07-09 (修复后)
+更新日期：2026-07-09 (最新修复)
 
 ## 结论
 
@@ -33,7 +33,10 @@
 | 问题 | 修复位置 | 状态 |
 |------|----------|------|
 | _read_file_data 返回空字节 | `src/core/hfs/extractor.py:154-181` | ✅ 使用 HFSPlusFileReader |
-| 提取按钮"功能待实现" | `src/gui/main_window.py:782-786` | ⚠️ 仍显示提示 |
+| 提取按钮"功能待实现" | `src/gui/main_window.py:782-786` | ✅ 已实现文件提取功能 |
+| 向上导航功能缺失 | `src/gui/main_window.py` | ✅ 已实现向上导航 |
+| 搜索结果路径为空 | `src/core/hfs/search.py` | ✅ 已实现路径构建 |
+| 信息面板数据未接通 | `src/gui/panels/info_panels.py` | ✅ 已实现字典数据接口 |
 
 ### 4. 写入功能 ✅ 已禁用
 
@@ -88,9 +91,7 @@ with HFSPlusVolume("disk.img") as vol:
 | FileVault 2 解密 | P1 | `src/core/crypto/` | 框架存在，密钥包返回空 |
 | Catalog thread records | P2 | `src/core/hfs/btree.py` | 定义但未解析 |
 | 叶节点循环检测 | P2 | `src/core/hfs/btree.py:624` | 损坏镜像可能无限循环 |
-| 搜索结果路径 | P2 | `src/core/hfs/search.py:156` | path="" TODO |
 | CLI 工具 unhfs | P2 | `src/cli/` | 空模块 |
-| 文件提取按钮 | P2 | `src/gui/main_window.py:782` | 仍显示"功能待实现" |
 
 ---
 

@@ -150,6 +150,9 @@ class MainWindow(QMainWindow):
         self.catalog_offset: int = 0
         self.node_size: int = 4096
         
+        # 目录导航历史 (用于向上导航)
+        self.folder_history: List[int] = []  # 父目录 ID 栈
+        
         # 加密卷支持
         self.encrypted_volume: Optional[EncryptedVolume] = None
         self.is_encrypted: bool = False
@@ -580,7 +583,14 @@ class MainWindow(QMainWindow):
     
     def _load_folder_contents(self, parent_id: int):
         """加载文件夹内容到表格"""
+        # 记录父目录历史（用于向上导航）
+        if self.current_folder_id != parent_id:
+            self.folder_history.append(self.current_folder_id)
+        
         self.current_folder_id = parent_id
+        
+        # 更新地址栏
+        self._update_address_bar(parent_id)
         
         # 检查缓存
         if parent_id in self.folder_cache:
@@ -589,6 +599,9 @@ class MainWindow(QMainWindow):
         else:
             # 异步加载
             self._load_folder_async(parent_id)
+        
+        # 更新向上按钮状态
+        self.up_action.setEnabled(len(self.folder_history) > 0 and parent_id != 2)
     
     def _update_view(self, contents: list):
         """更新视图内容"""
@@ -609,8 +622,25 @@ class MainWindow(QMainWindow):
     def _on_view_item_clicked(self, item_data: dict):
         """视图项目被点击"""
         # 更新信息面板
-        # TODO: 获取完整的文件/文件夹信息并显示
-        pass
+        if item_data:
+            if item_data['type'] == 'file':
+                self.info_panel.set_info_from_dict({
+                    'name': item_data.get('name', ''),
+                    'type': 'file',
+                    'size': item_data.get('size', 0),
+                    'create_date': item_data.get('create_date', 0),
+                    'mod_date': item_data.get('mod_date', 0),
+                    'id': item_data.get('id', 0),
+                })
+            elif item_data['type'] == 'folder':
+                self.info_panel.set_info_from_dict({
+                    'name': item_data.get('name', ''),
+                    'type': 'folder',
+                    'size': 0,
+                    'create_date': item_data.get('create_date', 0),
+                    'mod_date': item_data.get('mod_date', 0),
+                    'id': item_data.get('id', 0),
+                })
     
     def _on_view_item_double_clicked(self, item_data: dict):
         """视图项目被双击"""
@@ -699,11 +729,25 @@ class MainWindow(QMainWindow):
                 if item_data:
                     # 更新信息面板
                     if item_data['type'] == 'file':
-                        # TODO: 获取完整的文件记录并显示
-                        pass
+                        # 显示文件信息
+                        self.info_panel.set_info_from_dict({
+                            'name': item_data.get('name', ''),
+                            'type': 'file',
+                            'size': item_data.get('size', 0),
+                            'create_date': item_data.get('create_date', 0),
+                            'mod_date': item_data.get('mod_date', 0),
+                            'id': item_data.get('id', 0),
+                        })
                     elif item_data['type'] == 'folder':
-                        # TODO: 获取完整的文件夹记录并显示
-                        pass
+                        # 显示文件夹信息
+                        self.info_panel.set_info_from_dict({
+                            'name': item_data.get('name', ''),
+                            'type': 'folder',
+                            'size': 0,
+                            'create_date': item_data.get('create_date', 0),
+                            'mod_date': item_data.get('mod_date', 0),
+                            'id': item_data.get('id', 0),
+                        })
         else:
             self.selection_label.setText("选择: 0 个对象")
     
@@ -765,11 +809,62 @@ class MainWindow(QMainWindow):
         if not target_dir:
             return
         
-        # TODO: 实现实际的文件提取
-        QMessageBox.information(
-            self, "提取", 
-            f"将提取 {len(files)} 个文件到:\n{target_dir}\n\n功能待实现"
-        )
+        # 创建进度对话框
+        progress = QProgressDialog("正在提取文件...", "取消", 0, len(files), self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        
+        extracted_count = 0
+        errors = []
+        
+        try:
+            # 使用 HFSPlusVolume 提取文件
+            with HFSPlusVolume(self.current_path) as vol:
+                for i, file_data in enumerate(files):
+                    if progress.wasCanceled():
+                        break
+                    
+                    progress.setLabelText(f"正在提取: {file_data['name']}")
+                    progress.setValue(i)
+                    QApplication.processEvents()
+                    
+                    try:
+                        # 构建输出路径
+                        output_path = os.path.join(target_dir, file_data['name'])
+                        
+                        # 读取文件数据
+                        file_id = file_data['id']
+                        data = vol.read_file(file_id)
+                        
+                        # 写入文件
+                        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                        with open(output_path, 'wb') as f:
+                            f.write(data)
+                        
+                        extracted_count += 1
+                    except Exception as e:
+                        errors.append(f"{file_data['name']}: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"提取失败: {str(e)}")
+            return
+        finally:
+            progress.setValue(len(files))
+        
+        # 显示结果
+        if errors:
+            error_text = "\n".join(errors[:10])
+            if len(errors) > 10:
+                error_text += f"\n... 还有 {len(errors) - 10} 个错误"
+            QMessageBox.warning(
+                self, "提取完成",
+                f"成功提取 {extracted_count}/{len(files)} 个文件\n\n错误:\n{error_text}"
+            )
+        else:
+            QMessageBox.information(
+                self, "提取完成",
+                f"成功提取 {extracted_count} 个文件到:\n{target_dir}"
+            )
     
     def _show_selected_info(self):
         """显示选中项目的信息"""
@@ -793,9 +888,39 @@ class MainWindow(QMainWindow):
                     QMessageBox.information(self, "属性", info)
     
     def _go_up(self):
-        """向上导航"""
-        # TODO: 实现向上导航到父目录
-        pass
+        """向上导航到父目录"""
+        if not self.folder_history:
+            return
+        
+        # 从历史记录中取出父目录 ID
+        parent_id = self.folder_history.pop()
+        
+        # 更新向上按钮状态
+        self.up_action.setEnabled(len(self.folder_history) > 0 and parent_id != 2)
+        
+        # 加载父目录内容（不记录历史）
+        self.current_folder_id = parent_id
+        self._update_address_bar(parent_id)
+        
+        # 检查缓存
+        if parent_id in self.folder_cache:
+            self._update_table(self.folder_cache[parent_id])
+            self._update_view(self.folder_cache[parent_id])
+        else:
+            self._load_folder_async(parent_id)
+    
+    def _update_address_bar(self, folder_id: int):
+        """更新地址栏显示"""
+        # 构建路径
+        path_parts = []
+        current_id = folder_id
+        
+        # 从 folder_cache 中查找父目录名称
+        # 简化处理：只显示 CNID
+        if folder_id == 2:
+            self.address_edit.setText("/")
+        else:
+            self.address_edit.setText(f"CNID: {folder_id}")
     
     def _refresh(self):
         """刷新当前视图"""

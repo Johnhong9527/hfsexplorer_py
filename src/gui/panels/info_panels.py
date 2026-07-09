@@ -220,6 +220,41 @@ class FileInfoPanel(QWidget):
         self.owner_label.setText(str(folder.get_owner_id()))
         self.group_label.setText(str(folder.get_group_id()))
         self.mode_label.setText(format_mode(folder.get_file_mode()))
+    
+    def set_info_from_dict(self, info: dict):
+        """
+        从字典设置信息
+        
+        Args:
+            info: 包含文件/文件夹信息的字典
+        """
+        name = info.get('name', '')
+        item_type = info.get('type', 'file')
+        size = info.get('size', 0)
+        create_date = info.get('create_date', 0)
+        mod_date = info.get('mod_date', 0)
+        item_id = info.get('id', 0)
+        
+        self.name_label.setText(name)
+        self.type_label.setText("文件" if item_type == 'file' else "文件夹")
+        
+        if item_type == 'file':
+            self.size_label.setText(format_size(size))
+        else:
+            self.size_label.setText("-")
+        
+        self.cnid_label.setText(str(item_id))
+        
+        self.create_date_label.setText(hfs_date_to_string(create_date))
+        self.mod_date_label.setText(hfs_date_to_string(mod_date))
+        
+        # 清空其他字段（因为字典中没有这些信息）
+        self.access_date_label.setText("-")
+        self.backup_date_label.setText("-")
+        self.attr_mod_date_label.setText("-")
+        self.owner_label.setText("-")
+        self.group_label.setText("-")
+        self.mode_label.setText("-")
 
 
 class VolumeInfoPanel(QWidget):
