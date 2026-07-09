@@ -1,11 +1,11 @@
 # HFSExplorer 项目审查报告
 
 审查日期：2026-07-09
-更新日期：2026-07-09 (最新修复)
+更新日期：2026-07-09
 
 ## 结论
 
-项目已完成第一阶段和第二阶段的核心修复，并新增了多项功能。Catalog 解析按 TN1150 规范修复，文件提取功能已实现，GUI 可以正常启动。当前状态为 **Alpha 只读 HFS+/HFSX 浏览器**，支持分区表解析。
+项目已完成核心功能实现，包括读取、写入框架和分区表解析。当前状态为 **Alpha 读写 HFS+/HFSX 浏览器**。
 
 ---
 
@@ -15,60 +15,76 @@
 
 | 问题 | 修复位置 | 状态 |
 |------|----------|------|
-| B-tree 偏移表顺序错误 | `src/core/hfs/btree.py:459-488` | ✅ 已修复 |
-| Catalog 名称忽略 HFSUniStr255.length | `src/core/hfs/btree.py:796` | ✅ 已修复 |
-| 文件夹记录格式错误 | `src/core/hfs/btree.py:853-903` | ✅ 已修复 (88 bytes) |
-| 文件记录格式错误 | `src/core/hfs/btree.py:960-1022` | ✅ 已修复 (248 bytes) |
+| B-tree 偏移表顺序错误 | `src/core/hfs/btree.py` | ✅ 已修复 |
+| Catalog 名称忽略 HFSUniStr255.length | `src/core/hfs/btree.py` | ✅ 已修复 |
+| 文件夹记录格式错误 | `src/core/hfs/btree.py` | ✅ 已修复 |
+| 文件记录格式错误 | `src/core/hfs/btree.py` | ✅ 已修复 |
+| HFSPlusCatalogFolder.from_bytes 格式字符串 | `src/core/hfs/btree.py` | ✅ 已修复 |
+| HFSPlusCatalogFile.from_bytes 格式字符串 | `src/core/hfs/btree.py` | ✅ 已修复 |
 
 ### 2. GUI 目录浏览 ✅ 已修复
 
 | 问题 | 修复位置 | 状态 |
 |------|----------|------|
-| Catalog 初始化为 pass | `src/gui/main_window.py:60-95` | ✅ 使用 HFSPlusVolume |
-| 目录加载使用偏移 0 | `src/gui/main_window.py:98-120` | ✅ 使用 HFSPlusVolume |
+| Catalog 初始化为 pass | `src/gui/main_window.py` | ✅ 使用 HFSPlusVolume |
+| 目录加载使用偏移 0 | `src/gui/main_window.py` | ✅ 使用 HFSPlusVolume |
 | B-tree 节点大小错误 | 移除 node_size 参数 | ✅ 从 B-tree 头记录读取 |
 
 ### 3. 文件读取和提取 ✅ 已修复
 
 | 问题 | 修复位置 | 状态 |
 |------|----------|------|
-| _read_file_data 返回空字节 | `src/core/hfs/extractor.py:154-181` | ✅ 使用 HFSPlusFileReader |
-| 提取按钮"功能待实现" | `src/gui/main_window.py:782-786` | ✅ 已实现文件提取功能 |
+| _read_file_data 返回空字节 | `src/core/hfs/extractor.py` | ✅ 使用 HFSPlusFileReader |
+| 提取按钮"功能待实现" | `src/gui/main_window.py` | ✅ 已实现文件提取功能 |
 | 向上导航功能缺失 | `src/gui/main_window.py` | ✅ 已实现向上导航 |
 | 搜索结果路径为空 | `src/core/hfs/search.py` | ✅ 已实现路径构建 |
 | 信息面板数据未接通 | `src/gui/panels/info_panels.py` | ✅ 已实现字典数据接口 |
 
-### 4. 写入功能 ✅ 已禁用
+### 4. Unicode 比较 ✅ 已实现
 
 | 问题 | 修复位置 | 状态 |
 |------|----------|------|
-| 写入模块公开导出 | `src/core/hfs/__init__.py:123-125` | ✅ 只导出 WriteError |
+| 原始字节比较 | `src/core/hfs/btree.py` | ✅ NFD + casefold |
+| Catalog key 比较 | `src/core/hfs/btree.py` | ✅ parentID + nodeName |
+| Extent key 比较 | `src/core/hfs/btree.py` | ✅ forkType + fileID + startBlock |
 
-### 5. Unicode 比较 ✅ 已实现
-
-| 问题 | 修复位置 | 状态 |
-|------|----------|------|
-| 原始字节比较 | `src/core/hfs/btree.py:35-108` | ✅ NFD + casefold |
-| Catalog key 比较 | `src/core/hfs/btree.py:110-145` | ✅ parentID + nodeName |
-| Extent key 比较 | `src/core/hfs/btree.py:148-175` | ✅ forkType + fileID + startBlock |
-
-### 6. Extents Overflow ✅ 已实现
+### 5. Extents Overflow ✅ 已实现
 
 | 问题 | 修复位置 | 状态 |
 |------|----------|------|
-| 无 overflow 支持 | `src/core/hfs/btree.py:1226-1283` | ✅ get_extents_for_fork |
+| 无 overflow 支持 | `src/core/hfs/btree.py` | ✅ get_extents_for_fork |
 
-### 7. 版本和文档 ✅ 已修复
+### 6. 分区表解析 ✅ 已实现
+
+| 问题 | 修复位置 | 状态 |
+|------|----------|------|
+| 空模块 | `src/core/partition/__init__.py` | ✅ APM/GPT/MBR 解析 |
+| 无分区选择 | `src/gui/main_window.py` | ✅ 自动弹出选择对话框 |
+
+### 7. 写入功能 ✅ 框架已实现
+
+| 问题 | 修复位置 | 状态 |
+|------|----------|------|
+| B-tree 变异引擎 | `src/core/hfs/btree_mutator.py` | ✅ 插入/删除/分裂/合并 |
+| Catalog 写入器 | `src/core/hfs/writer.py` | ✅ 创建文件/文件夹 |
+| 分配位图管理 | `src/core/hfs/writer.py` | ✅ 空闲块查找和分配 |
+| 数据结构序列化 | `src/core/hfs/btree.py` | ✅ to_bytes 方法 |
+| BTNodeDescriptor.STRUCT_SIZE | `src/core/hfs/btree_mutator.py` | ✅ 改用 BTREE_NODE_DESCRIPTOR_SIZE |
+| bytes 不可变问题 | `src/core/hfs/btree_mutator.py` | ✅ 转换为 bytearray |
+
+### 8. 版本和文档 ✅ 已修复
 
 | 问题 | 修复位置 | 状态 |
 |------|----------|------|
 | 版本号 1.0.0 | `pyproject.toml`, `setup.py` | ✅ 0.1.0-alpha |
 | README 声明未实现功能 | `README.md` | ✅ 已精简 |
-| unhfs 入口不存在 | `pyproject.toml:43`, `setup.py:40` | ✅ 已移除 |
+| unhfs 入口不存在 | `pyproject.toml`, `setup.py` | ✅ 已移除 |
 
 ---
 
 ## 当前可用功能
+
+### 读取功能
 
 ```python
 from src.core.hfs import HFSPlusVolume
@@ -80,6 +96,27 @@ with HFSPlusVolume("disk.img") as vol:
     file_info = vol.get_file_info(id)  # ✅ 文件属性
 ```
 
+### 分区表解析
+
+```python
+from src.core.partition import parse_partitions, find_hfs_partitions
+
+with open("disk.img", "rb") as f:
+    partition_type, partitions = parse_partitions(f)
+    hfs_partitions = find_hfs_partitions(f)
+```
+
+### 写入功能（框架）
+
+```python
+from src.core.hfs.writer import CatalogWriter, AllocationBitmap
+
+# 创建文件（需要完整的 B-tree 和卷头）
+writer = CatalogWriter(catalog, volume_header, stream)
+file_id = writer.create_file(parent_id, "test.txt", data)
+folder_id = writer.create_folder(parent_id, "New Folder")
+```
+
 ---
 
 ## 仍缺失的功能
@@ -89,6 +126,7 @@ with HFSPlusVolume("disk.img") as vol:
 | DMG/UDIF 支持 | P2 | `src/core/dmg/` | 空模块 |
 | FileVault 2 解密 | P1 | `src/core/crypto/` | 框架存在，密钥包返回空 |
 | CLI 工具 unhfs | P2 | `src/cli/` | 空模块 |
+| APFS 支持 | P1 | - | 未开始 |
 
 ---
 
@@ -111,8 +149,8 @@ with HFSPlusVolume("disk.img") as vol:
 | `a0efe78` | 2026-07-09 | 实现 Unicode 比较、Extents Overflow、HFSPlusVolume |
 | `834aba8` | 2026-07-09 | 修复 HFSPlusVolume 初始化、文件提取器、GUI 集成 |
 | `8951140` | 2026-07-09 | 修复 view_manager.py QHeaderView 导入 |
-| 未提交 | 2026-07-09 | 实现 Catalog Thread 记录解析、叶节点循环检测、分区表解析 |
-| 未提交 | 2026-07-09 | 集成分区选择功能到 GUI，支持多分区镜像 |
+| `2455fe3` | 2026-07-09 | 实现 Catalog Thread、叶节点循环检测、分区表解析 |
+| `c817e5b` | 2026-07-09 | 修复写入功能、添加序列化方法、修复格式字符串 |
 
 ---
 

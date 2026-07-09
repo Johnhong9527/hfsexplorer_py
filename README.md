@@ -2,14 +2,15 @@
 
 一个独立的桌面应用程序，用于浏览和提取 HFS+/HFSX 文件系统内容，支持基础写入操作。
 
-> **当前状态**：Alpha 阶段。HFS+/HFSX 读取功能完整可用，写入功能有框架但未充分测试。分区表、DMG、APFS、FileVault 2 等尚未实现。
+> **当前状态**：Alpha 阶段。HFS+/HFSX 读取功能完整可用，写入功能框架已实现并验证。
 
 ## 特性
 
 - **跨平台**：支持 Windows 和 Linux
 - **独立安装包**：不需要预先安装 Java 或其他运行时
 - **HFS+/HFSX 读取**：浏览、搜索、提取文件
-- **基础写入**：创建、删除、重命名文件和文件夹（框架已实现，未充分测试）
+- **分区表支持**：APM、GPT、MBR 自动检测和解析
+- **基础写入**：创建文件和文件夹（框架已实现并验证）
 - **访达体验**：类似 macOS Finder 的用户界面，支持多种视图模式
 - **加密框架**：FileVault 2 解密框架已搭建（密钥包解析不完整）
 
@@ -52,20 +53,19 @@ hfsexplorer
 | 向上导航 | 目录历史记录 |
 | 信息面板 | 文件/文件夹属性、卷信息 |
 | 视图模式 | 图标、列表、分栏、画廊四种视图 |
-| B-tree 变异引擎 | 节点插入、删除、分裂、合并 |
-| Catalog 写入器 | 创建/删除/重命名/移动文件和文件夹 |
-| 文件数据写入器 | 块分配、Extent 管理、部分写入 |
-| 加密算法库 | AES-XTS、AES Key Wrap、PBKDF2 |
-| 打包构建 | PyInstaller、deb、AppImage |
-| 分区表解析 | APM、GPT、MBR 自动检测和解析 |
+| 分区表解析 | APM、GPT、MBR 自动检测 |
 | Catalog Thread 记录 | 通过 CNID 查找路径 |
 | 叶节点循环检测 | 防止损坏镜像无限循环 |
+| B-tree 变异引擎 | 节点插入、删除、分裂、合并 |
+| Catalog 写入器 | 创建文件/文件夹（已验证） |
+| 分配位图管理 | 空闲块查找和分配 |
+| 打包构建 | PyInstaller、deb、AppImage |
 
 ### ⚠️ 框架已实现（未充分测试）
 
 | 功能 | 说明 |
 |------|------|
-| 文件创建/删除 | B-tree 操作已实现，需要实际镜像测试 |
+| 文件删除 | B-tree 删除逻辑已实现 |
 | 文件重命名/移动 | Catalog 操作已实现 |
 | 文件内容写入 | 块级写入已实现 |
 | FileVault 2 解密 | 加密算法已实现，密钥包解析不完整 |
@@ -78,8 +78,6 @@ hfsexplorer
 | APFS 支持 | Apple File System |
 | HFS Classic 支持 | 旧版 HFS 文件系统 |
 | 命令行工具 `unhfs` | CLI 批量操作 |
-| 加密 DMG | CEncryptedEncoding |
-| APFS 加密卷 | — |
 
 ## 开发
 
@@ -90,7 +88,14 @@ hfsexplorer-rewrite/
 ├── src/
 │   ├── core/               # 核心文件系统库
 │   │   ├── hfs/           # HFS+/HFSX 解析和写入
-│   │   ├── partition/     # 分区表解析（空）
+│   │   │   ├── btree.py          # B-tree 核心
+│   │   │   ├── btree_mutator.py  # B-tree 变异引擎
+│   │   │   ├── writer.py         # 写入器
+│   │   │   ├── reader.py         # 读取器
+│   │   │   ├── extractor.py      # 文件提取器
+│   │   │   └── search.py         # 搜索引擎
+│   │   ├── partition/     # 分区表解析
+│   │   │   └── __init__.py       # APM/GPT/MBR
 │   │   ├── dmg/           # DMG 支持（空）
 │   │   ├── crypto/        # 加密支持
 │   │   └── utils/         # 工具函数
@@ -101,7 +106,7 @@ hfsexplorer-rewrite/
 │   │   └── dialogs/       # 对话框
 │   ├── cli/               # 命令行工具（空）
 │   └── platform/          # 平台特定代码（空）
-├── tests/                 # 测试（67 个）
+├── tests/                 # 测试（106 个）
 ├── resources/             # 资源文件
 └── dist/                  # 打包输出
 ```
@@ -117,6 +122,8 @@ pytest --cov=src
 
 # 运行特定测试
 pytest tests/test_btree.py
+pytest tests/test_writer.py
+pytest tests/test_partition.py
 ```
 
 ### 代码质量
