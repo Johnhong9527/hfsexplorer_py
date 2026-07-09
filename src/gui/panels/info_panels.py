@@ -464,3 +464,13 @@ class FilePropertiesPanel(QWidget):
         """设置卷头信息"""
         self.volume_info_panel.set_volume_header(header)
         self.tab_widget.setCurrentIndex(1)
+    
+    def set_info_from_dict(self, info: dict):
+        """
+        从字典设置信息
+        
+        Args:
+            info: 包含文件/文件夹信息的字典
+        """
+        self.file_info_panel.set_info_from_dict(info)
+        self.tab_widget.setCurrentIndex(0)
