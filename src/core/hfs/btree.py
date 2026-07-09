@@ -620,8 +620,22 @@ class BTreeFile:
         
         nodes = []
         node_number = h.firstLeafNode
+        visited = set()  # 用于循环检测
         
         while node_number != 0:
+            # 循环检测
+            if node_number in visited:
+                import warnings
+                warnings.warn(f"叶节点链表中检测到循环: 节点 {node_number}")
+                break
+            visited.add(node_number)
+            
+            # 检查节点号是否有效
+            if node_number >= h.totalNodes:
+                import warnings
+                warnings.warn(f"无效的叶节点号: {node_number} (总节点数: {h.totalNodes})")
+                break
+            
             node = self._read_node(node_number)
             nodes.append(node)
             node_number = node.descriptor.fLink
@@ -913,6 +927,57 @@ class HFSPlusCatalogFolder:
     def get_file_mode(self) -> int:
         """获取文件模式"""
         return struct.unpack_from('>H', self.permissions, 10)[0]
+
+
+@dataclass
+class HFSPlusCatalogThread:
+    """
+    HFS+ Catalog 线程记录
+    
+    用于通过 CNID 查找文件/文件夹的父 ID 和名称。
+    
+    Attributes:
+        record_type: 记录类型 (0x0003=文件夹线程, 0x0004=文件线程)
+        reserved: 保留字段
+        parent_id: 父文件夹 CNID
+        node_name: 节点名称 (UTF-16BE)
+    """
+    record_type: int
+    reserved: int
+    parent_id: int
+    node_name: str
+    
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0) -> 'HFSPlusCatalogThread':
+        """从字节序列解析"""
+        # 线程记录格式 (TN1150):
+        # SInt16 recordType (2 bytes)
+        # SInt16 reserved (2 bytes)
+        # UInt32 parentID (4 bytes)
+        # HFSUniStr255 nodeName (变长)
+        record_type, reserved, parent_id = struct.unpack_from('>HHI', data, offset)
+        
+        # 解析 nodeName (HFSUniStr255)
+        name_length = struct.unpack_from('>H', data, offset + 8)[0]
+        name_bytes = data[offset + 10:offset + 10 + name_length * 2]
+        node_name = name_bytes.decode('utf-16-be') if name_length > 0 else ""
+        
+        return cls(
+            record_type=record_type,
+            reserved=reserved,
+            parent_id=parent_id,
+            node_name=node_name
+        )
+    
+    @property
+    def is_folder_thread(self) -> bool:
+        """是否为文件夹线程记录"""
+        return self.record_type == CatalogRecordType.FOLDER_THREAD
+    
+    @property
+    def is_file_thread(self) -> bool:
+        """是否为文件线程记录"""
+        return self.record_type == CatalogRecordType.FILE_THREAD
 
 
 @dataclass
@@ -1301,6 +1366,65 @@ class CatalogBTree(BTreeFile):
     def parse_catalog_key(self, data: bytes, offset: int = 0) -> HFSPlusCatalogKey:
         """解析 Catalog 键"""
         return HFSPlusCatalogKey.from_bytes(data, offset)
+    
+    def find_thread_record(self, cnid: int) -> Optional[HFSPlusCatalogThread]:
+        """
+        查找 Catalog 线程记录
+        
+        通过 CNID 查找对应的线程记录，获取父 ID 和名称。
+        
+        Args:
+            cnid: Catalog Node ID
+        
+        Returns:
+            线程记录，如果未找到则返回 None
+        """
+        # 遍历所有叶记录
+        for node in self.list_leaf_nodes():
+            for i in range(node.num_records):
+                data = node.get_record_data(i)
+                
+                # 解析键
+                key = HFSPlusCatalogKey.from_bytes(data)
+                
+                # 检查是否是目标 CNID 的线程记录
+                # 线程记录的 parentID 是它自己的 CNID
+                if key.parent_id == cnid:
+                    # 获取记录类型
+                    record_type = struct.unpack_from('>H', data, key.occupied_size)[0]
+                    
+                    # 检查是否是线程记录
+                    if record_type in (CatalogRecordType.FOLDER_THREAD,
+                                       CatalogRecordType.FILE_THREAD):
+                        return HFSPlusCatalogThread.from_bytes(data, key.occupied_size)
+        
+        return None
+    
+    def get_path_for_cnid(self, cnid: int) -> str:
+        """
+        获取 CNID 对应的完整路径
+        
+        通过线程记录递归构建完整路径。
+        
+        Args:
+            cnid: Catalog Node ID
+        
+        Returns:
+            完整路径字符串
+        """
+        path_parts = []
+        current_id = cnid
+        
+        while current_id != CatalogNodeID.ROOT_FOLDER and current_id != 0:
+            thread = self.find_thread_record(current_id)
+            if thread is None:
+                break
+            
+            path_parts.append(thread.node_name)
+            current_id = thread.parent_id
+        
+        path_parts.reverse()
+        return '/' + '/'.join(path_parts)
     
     def list_folder_contents(self, parent_id: int) -> List[dict]:
         """

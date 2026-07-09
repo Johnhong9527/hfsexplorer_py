@@ -92,6 +92,7 @@ from .btree import (
     HFSPlusCatalogKey,
     HFSPlusCatalogFolder,
     HFSPlusCatalogFile,
+    HFSPlusCatalogThread,
     CatalogBTree,
     
     # Extents
@@ -186,6 +187,7 @@ __all__ = [
     'HFSPlusCatalogKey',
     'HFSPlusCatalogFolder',
     'HFSPlusCatalogFile',
+    'HFSPlusCatalogThread',
     'CatalogBTree',
     
     # Extents

@@ -57,6 +57,9 @@ hfsexplorer
 | 文件数据写入器 | 块分配、Extent 管理、部分写入 |
 | 加密算法库 | AES-XTS、AES Key Wrap、PBKDF2 |
 | 打包构建 | PyInstaller、deb、AppImage |
+| 分区表解析 | APM、GPT、MBR 自动检测和解析 |
+| Catalog Thread 记录 | 通过 CNID 查找路径 |
+| 叶节点循环检测 | 防止损坏镜像无限循环 |
 
 ### ⚠️ 框架已实现（未充分测试）
 
@@ -71,7 +74,6 @@ hfsexplorer
 
 | 功能 | 说明 |
 |------|------|
-| 分区表解析 | APM、GPT、MBR |
 | DMG 镜像支持 | UDIF、稀疏镜像 |
 | APFS 支持 | Apple File System |
 | HFS Classic 支持 | 旧版 HFS 文件系统 |

@@ -5,7 +5,7 @@
 
 ## 结论
 
-项目已完成第一阶段和第二阶段的核心修复。Catalog 解析按 TN1150 规范修复，文件提取功能已实现，GUI 可以正常启动。当前状态为 **Alpha 只读 HFS+/HFSX 浏览器**。
+项目已完成第一阶段和第二阶段的核心修复，并新增了多项功能。Catalog 解析按 TN1150 规范修复，文件提取功能已实现，GUI 可以正常启动。当前状态为 **Alpha 只读 HFS+/HFSX 浏览器**，支持分区表解析。
 
 ---
 
@@ -86,11 +86,8 @@ with HFSPlusVolume("disk.img") as vol:
 
 | 功能 | 优先级 | 位置 | 说明 |
 |------|--------|------|------|
-| 分区表解析 (APM/GPT/MBR) | P2 | `src/core/partition/` | 空模块 |
 | DMG/UDIF 支持 | P2 | `src/core/dmg/` | 空模块 |
 | FileVault 2 解密 | P1 | `src/core/crypto/` | 框架存在，密钥包返回空 |
-| Catalog thread records | P2 | `src/core/hfs/btree.py` | 定义但未解析 |
-| 叶节点循环检测 | P2 | `src/core/hfs/btree.py:624` | 损坏镜像可能无限循环 |
 | CLI 工具 unhfs | P2 | `src/cli/` | 空模块 |
 
 ---
@@ -98,7 +95,7 @@ with HFSPlusVolume("disk.img") as vol:
 ## 验证结果
 
 - ✅ Python 语法编译检查通过
-- ✅ 67 个测试全部通过
+- ✅ 81 个测试全部通过
 - ✅ GUI 可以正常启动 (offscreen 模式)
 - ✅ deb 包构建成功 (104K)
 - ✅ 核心模块导入成功
@@ -113,6 +110,8 @@ with HFSPlusVolume("disk.img") as vol:
 | `a0efe78` | 2026-07-09 | 实现 Unicode 比较、Extents Overflow、HFSPlusVolume |
 | `834aba8` | 2026-07-09 | 修复 HFSPlusVolume 初始化、文件提取器、GUI 集成 |
 | `8951140` | 2026-07-09 | 修复 view_manager.py QHeaderView 导入 |
+| 未提交 | 2026-07-09 | 实现 Catalog Thread 记录解析、叶节点循环检测、分区表解析 |
+| 未提交 | 2026-07-09 | 集成分区选择功能到 GUI，支持多分区镜像 |
 
 ---
 

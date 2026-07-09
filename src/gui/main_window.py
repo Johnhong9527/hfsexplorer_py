@@ -33,12 +33,21 @@ from src.core.hfs import (
     HFSPlusCatalogKey,
     HFSPlusCatalogFolder,
     HFSPlusCatalogFile,
+    HFSPlusCatalogThread,
     HFS_EPOCH_OFFSET,
     BTreeFile,
     SearchEngine,
     SearchMatchType,
     SearchFilter,
     SearchResult,
+)
+
+from src.core.partition import (
+    PartitionType,
+    PartitionEntry,
+    parse_partitions,
+    detect_partition_type,
+    find_hfs_partitions,
 )
 
 from src.core.crypto import (
@@ -60,14 +69,15 @@ class FileLoadThread(QThread):
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
     
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, offset: int = 0):
         super().__init__()
         self.file_path = file_path
+        self.offset = offset
     
     def run(self):
         try:
             # 使用 HFSPlusVolume 统一加载
-            with HFSPlusVolume(self.file_path) as vol:
+            with HFSPlusVolume(self.file_path, volume_offset=self.offset) as vol:
                 header = vol.header
                 info = vol.get_info()
                 
@@ -459,8 +469,56 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         
+        # 检查是否有分区表
+        try:
+            with open(path, 'rb') as f:
+                partition_type, partitions = parse_partitions(f)
+                
+                # 如果有多个分区，让用户选择
+                if len(partitions) > 1:
+                    hfs_partitions = [p for p in partitions if p.is_hfs]
+                    
+                    if len(hfs_partitions) > 1:
+                        # 显示分区选择对话框
+                        items = [f"{p.name} ({p.type_name}, {p.size_bytes / (1024**3):.2f} GB)" for p in hfs_partitions]
+                        item, ok = QInputDialog.getItem(
+                            self, "选择分区",
+                            f"检测到 {partition_type.name} 分区表，请选择要打开的分区:",
+                            items, 0, False
+                        )
+                        
+                        if ok and item:
+                            idx = items.index(item)
+                            selected_partition = hfs_partitions[idx]
+                            # 使用分区偏移量加载
+                            self._load_filesystem_with_offset(path, selected_partition.start_offset)
+                            return
+                    elif len(hfs_partitions) == 1:
+                        # 只有一个 HFS+ 分区，直接使用
+                        self._load_filesystem_with_offset(path, hfs_partitions[0].start_offset)
+                        return
+        except Exception:
+            pass
+        
         # 启动加载线程
         self.load_thread = FileLoadThread(path)
+        self.load_thread.finished.connect(self._on_load_finished)
+        self.load_thread.error.connect(self._on_load_error)
+        self.load_thread.start()
+    
+    def _load_filesystem_with_offset(self, path: str, offset: int):
+        """加载文件系统（指定偏移量）"""
+        self.statusBar().showMessage(f"正在加载: {path} (偏移: {offset})")
+        self.address_edit.setText(f"{path} @ {offset}")
+        
+        # 禁用 UI
+        self.setEnabled(False)
+        
+        # 清空缓存
+        self.folder_cache.clear()
+        
+        # 启动加载线程（带偏移量）
+        self.load_thread = FileLoadThread(path, offset=offset)
         self.load_thread.finished.connect(self._on_load_finished)
         self.load_thread.error.connect(self._on_load_error)
         self.load_thread.start()
