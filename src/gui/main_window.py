@@ -217,6 +217,12 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self._open_file)
         file_menu.addAction(open_action)
         
+        # 打开设备
+        open_device_action = QAction("打开设备(&D)...", self)
+        open_device_action.setShortcut("Ctrl+D")
+        open_device_action.triggered.connect(self._open_device)
+        file_menu.addAction(open_device_action)
+        
         file_menu.addSeparator()
         
         # 新建子菜单
@@ -445,6 +451,16 @@ class MainWindow(QMainWindow):
         
         if file_path:
             self._load_filesystem(file_path)
+    
+    def _open_device(self):
+        """打开物理设备"""
+        from src.gui.dialogs.device_dialog import DeviceSelectionDialog
+        
+        dialog = DeviceSelectionDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            device_path = dialog.get_selected_device()
+            if device_path:
+                self._load_filesystem(device_path)
     
     def _load_filesystem(self, path: str):
         """加载文件系统"""
