@@ -41,6 +41,7 @@ from src.core.hfs import (
     SearchFilter,
     SearchResult,
 )
+from src.core.hfs.writer import CatalogWriter, WriteError
 
 from src.core.partition import (
     PartitionType,
@@ -148,7 +149,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("HFSExplorer (Alpha) - 只读 HFS+/HFSX")
+        self.setWindowTitle("HFSExplorer (Alpha) - HFS+/HFSX 读写浏览器")
         self.setMinimumSize(1024, 768)
         
         # 启用拖放
@@ -160,6 +161,12 @@ class MainWindow(QMainWindow):
         self.current_catalog: Optional[CatalogBTree] = None
         self.catalog_offset: int = 0
         self.node_size: int = 4096
+        
+        # 写入支持
+        self.write_stream = None  # 用于写入的文件流
+        self.catalog_writer: Optional[CatalogWriter] = None
+        self.is_readonly: bool = True  # 是否只读模式
+        self.volume: Optional[HFSPlusVolume] = None  # 保持 volume 引用
         
         # 目录导航历史 (用于向上导航)
         self.folder_history: List[int] = []  # 父目录 ID 栈
@@ -198,6 +205,21 @@ class MainWindow(QMainWindow):
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._open_file)
         file_menu.addAction(open_action)
+        
+        file_menu.addSeparator()
+        
+        # 新建子菜单
+        new_menu = file_menu.addMenu("新建(&N)")
+        
+        new_file_action = QAction("新建文件(&F)...", self)
+        new_file_action.setShortcut("Ctrl+N")
+        new_file_action.triggered.connect(self._create_new_file)
+        new_menu.addAction(new_file_action)
+        
+        new_folder_action = QAction("新建文件夹(&D)...", self)
+        new_folder_action.setShortcut("Ctrl+Shift+N")
+        new_folder_action.triggered.connect(self._create_new_folder)
+        new_menu.addAction(new_folder_action)
         
         file_menu.addSeparator()
         
@@ -868,16 +890,55 @@ class MainWindow(QMainWindow):
         """显示右键菜单"""
         menu = QMenu(self)
         
-        open_action = menu.addAction("打开")
-        open_action.triggered.connect(self._open_selected)
+        # 获取当前选中的项目
+        selected_items = self.table_widget.selectedItems()
+        has_selection = len(selected_items) > 0
         
-        extract_action = menu.addAction("提取...")
-        extract_action.triggered.connect(self._extract_selected)
+        # 获取选中的项目数据
+        selected_item_data = None
+        if has_selection:
+            row = selected_items[0].row()
+            name_item = self.table_widget.item(row, 0)
+            if name_item:
+                selected_item_data = name_item.data(Qt.ItemDataRole.UserRole)
+        
+        # 新建子菜单
+        new_menu = menu.addMenu("新建")
+        
+        new_file_action = new_menu.addAction("新建文件...")
+        new_file_action.triggered.connect(self._create_new_file)
+        
+        new_folder_action = new_menu.addAction("新建文件夹...")
+        new_folder_action.triggered.connect(self._create_new_folder)
         
         menu.addSeparator()
         
-        info_action = menu.addAction("属性")
-        info_action.triggered.connect(self._show_selected_info)
+        # 打开（仅文件夹）
+        if selected_item_data and selected_item_data['type'] == 'folder':
+            open_action = menu.addAction("打开")
+            open_action.triggered.connect(self._open_selected)
+        
+        # 提取（仅文件）
+        if selected_item_data and selected_item_data['type'] == 'file':
+            extract_action = menu.addAction("提取...")
+            extract_action.triggered.connect(self._extract_selected)
+        
+        if has_selection:
+            menu.addSeparator()
+            
+            # 重命名
+            rename_action = menu.addAction("重命名")
+            rename_action.triggered.connect(self._rename_selected)
+            
+            # 删除
+            delete_action = menu.addAction("删除")
+            delete_action.triggered.connect(self._delete_selected)
+            
+            menu.addSeparator()
+            
+            # 属性
+            info_action = menu.addAction("属性")
+            info_action.triggered.connect(self._show_selected_info)
         
         menu.exec(QCursor.pos())
     
@@ -1000,6 +1061,225 @@ class MainWindow(QMainWindow):
                     
                     QMessageBox.information(self, "属性", info)
     
+    def _init_write_support(self):
+        """初始化写入支持"""
+        if self.write_stream is not None:
+            return True
+        
+        if self.current_path is None:
+            return False
+        
+        try:
+            # 以读写模式打开文件
+            self.write_stream = open(self.current_path, 'r+b')
+            
+            # 保持 volume 引用以使用 catalog 和 header
+            if self.volume is None:
+                self.volume = HFSPlusVolume(self.current_path)
+            
+            self.current_catalog = self.volume.catalog
+            self.current_header = self.volume.header
+            
+            # 创建 CatalogWriter
+            self.catalog_writer = CatalogWriter(
+                self.current_catalog, 
+                self.current_header, 
+                self.write_stream
+            )
+            
+            self.is_readonly = False
+            return True
+        except PermissionError:
+            QMessageBox.warning(self, "权限错误", "无法以写入模式打开文件，请检查文件权限。")
+            return False
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"初始化写入支持失败: {e}")
+            return False
+    
+    def _create_new_file(self):
+        """创建新文件"""
+        if not self._init_write_support():
+            return
+        
+        # 输入文件名
+        name, ok = QInputDialog.getText(
+            self, 
+            "新建文件", 
+            "请输入文件名:"
+        )
+        
+        if not ok or not name.strip():
+            return
+        
+        name = name.strip()
+        
+        try:
+            # 创建文件
+            file_id = self.catalog_writer.create_file(
+                self.current_folder_id, 
+                name, 
+                b''  # 空文件
+            )
+            
+            # 刷新视图
+            self._refresh_current_folder()
+            
+            self.statusBar().showMessage(f"已创建文件: {name} (CNID: {file_id})")
+        except WriteError as e:
+            QMessageBox.critical(self, "错误", f"创建文件失败: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"创建文件时发生错误: {e}")
+    
+    def _create_new_folder(self):
+        """创建新文件夹"""
+        if not self._init_write_support():
+            return
+        
+        # 输入文件夹名
+        name, ok = QInputDialog.getText(
+            self, 
+            "新建文件夹", 
+            "请输入文件夹名:"
+        )
+        
+        if not ok or not name.strip():
+            return
+        
+        name = name.strip()
+        
+        try:
+            # 创建文件夹
+            folder_id = self.catalog_writer.create_folder(
+                self.current_folder_id, 
+                name
+            )
+            
+            # 刷新视图
+            self._refresh_current_folder()
+            
+            self.statusBar().showMessage(f"已创建文件夹: {name} (CNID: {folder_id})")
+        except WriteError as e:
+            QMessageBox.critical(self, "错误", f"创建文件夹失败: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"创建文件夹时发生错误: {e}")
+    
+    def _delete_selected(self):
+        """删除选中的项目"""
+        if not self._init_write_support():
+            return
+        
+        # 获取选中的项目
+        selected_items = self.table_widget.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "删除", "请先选择要删除的项目")
+            return
+        
+        # 获取选中的项目数据
+        row = selected_items[0].row()
+        name_item = self.table_widget.item(row, 0)
+        if not name_item:
+            return
+        
+        item_data = name_item.data(Qt.ItemDataRole.UserRole)
+        if not item_data:
+            return
+        
+        # 确认删除
+        item_type = "文件" if item_data['type'] == 'file' else "文件夹"
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要删除{item_type} '{item_data['name']}' 吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        try:
+            # 删除项目
+            self.catalog_writer.delete_entry(
+                self.current_folder_id, 
+                item_data['name']
+            )
+            
+            # 刷新视图
+            self._refresh_current_folder()
+            
+            self.statusBar().showMessage(f"已删除: {item_data['name']}")
+        except WriteError as e:
+            QMessageBox.critical(self, "错误", f"删除失败: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"删除时发生错误: {e}")
+    
+    def _rename_selected(self):
+        """重命名选中的项目"""
+        if not self._init_write_support():
+            return
+        
+        # 获取选中的项目
+        selected_items = self.table_widget.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "重命名", "请先选择要重命名的项目")
+            return
+        
+        # 获取选中的项目数据
+        row = selected_items[0].row()
+        name_item = self.table_widget.item(row, 0)
+        if not name_item:
+            return
+        
+        item_data = name_item.data(Qt.ItemDataRole.UserRole)
+        if not item_data:
+            return
+        
+        # 输入新名称
+        new_name, ok = QInputDialog.getText(
+            self, 
+            "重命名", 
+            "请输入新名称:",
+            text=item_data['name']
+        )
+        
+        if not ok or not new_name.strip():
+            return
+        
+        new_name = new_name.strip()
+        
+        # 检查名称是否改变
+        if new_name == item_data['name']:
+            return
+        
+        try:
+            # 重命名项目
+            self.catalog_writer.rename_entry(
+                self.current_folder_id, 
+                item_data['name'],
+                new_name
+            )
+            
+            # 刷新视图
+            self._refresh_current_folder()
+            
+            self.statusBar().showMessage(f"已重命名: {item_data['name']} -> {new_name}")
+        except WriteError as e:
+            QMessageBox.critical(self, "错误", f"重命名失败: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"重命名时发生错误: {e}")
+    
+    def _refresh_current_folder(self):
+        """刷新当前文件夹"""
+        # 清除当前文件夹的缓存
+        if self.current_folder_id in self.folder_cache:
+            del self.folder_cache[self.current_folder_id]
+        
+        # 重新加载
+        self._load_folder_contents(self.current_folder_id)
+        
+        # 更新目录树
+        self._load_directory_tree()
+    
     def _go_up(self):
         """向上导航到父目录"""
         if not self.folder_history:
@@ -1077,8 +1357,13 @@ class MainWindow(QMainWindow):
             self,
             "关于 HFSExplorer",
             "HFSExplorer (Alpha)\n\n"
-            "只读 HFS+/HFSX 文件系统浏览器。\n\n"
-            "当前状态：Alpha 原型，仅支持基本目录浏览。\n"
+            "HFS+/HFSX 文件系统浏览器，支持读写操作。\n\n"
+            "功能:\n"
+            "- 浏览 HFS+/HFSX 卷\n"
+            "- 提取文件和文件夹\n"
+            "- 创建、删除、重命名文件和文件夹\n"
+            "- 搜索功能\n\n"
+            "当前状态：Alpha 原型。\n"
             "原作者: Erik Larsson (Catacombae Software)"
         )
     
@@ -1233,6 +1518,25 @@ class MainWindow(QMainWindow):
             self._load_filesystem(files[0])
         
         event.acceptProposedAction()
+    
+    def closeEvent(self, event):
+        """关闭窗口事件"""
+        # 关闭写入流
+        if self.write_stream:
+            try:
+                self.write_stream.close()
+            except:
+                pass
+        
+        # 关闭 volume
+        if self.volume:
+            try:
+                self.volume.close()
+            except:
+                pass
+        
+        # 接受关闭事件
+        event.accept()
 
 
 def main():
