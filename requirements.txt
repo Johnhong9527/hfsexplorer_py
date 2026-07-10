@@ -9,6 +9,9 @@ PyQt6-sip>=13.4.0
 pycryptodome>=3.15.0
 pycryptodomex>=3.15.0
 
+# 可选：真正的 AES-XTS 加密支持（推荐）
+cryptography>=41.0.0
+
 # 打包工具
 pyinstaller>=5.0
 

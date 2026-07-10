@@ -3,6 +3,9 @@
 真正的 AES-XTS 加密测试
 
 测试使用 cryptography 库实现的 AES-XTS 加密功能。
+
+注意：这些测试需要安装 cryptography 库。
+如果未安装，测试将被跳过。
 """
 
 import pytest
@@ -14,7 +17,20 @@ import tempfile
 # 添加 src 目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+# 检查 cryptography 是否可用
+try:
+    from src.core.crypto.real_crypto import CRYPTOGRAPHY_AVAILABLE
+except ImportError:
+    CRYPTOGRAPHY_AVAILABLE = False
 
+# 跳过装饰器
+requires_cryptography = pytest.mark.skipif(
+    not CRYPTOGRAPHY_AVAILABLE,
+    reason="cryptography 库未安装"
+)
+
+
+@pytest.mark.skipif(not CRYPTOGRAPHY_AVAILABLE, reason="cryptography 库未安装")
 class TestAESXTSCipher:
     """测试 AES-XTS 加密器"""
     
@@ -98,6 +114,7 @@ class TestAESXTSCipher:
         assert decrypted == data
 
 
+@pytest.mark.skipif(not CRYPTOGRAPHY_AVAILABLE, reason="cryptography 库未安装")
 class TestKeyDeriver:
     """测试密钥派生器"""
     
@@ -148,6 +165,7 @@ class TestKeyDeriver:
         assert key1 != key2
 
 
+@pytest.mark.skipif(not CRYPTOGRAPHY_AVAILABLE, reason="cryptography 库未安装")
 class TestKeyUnwrapper:
     """测试密钥解包器"""
     
@@ -173,6 +191,7 @@ class TestKeyUnwrapper:
         assert len(unwrapped) == 32
 
 
+@pytest.mark.skipif(not CRYPTOGRAPHY_AVAILABLE, reason="cryptography 库未安装")
 class TestCryptoManager:
     """测试加密管理器"""
     
@@ -194,6 +213,7 @@ class TestCryptoManager:
         assert manager.decrypt_block(0, data) == data
 
 
+@pytest.mark.skipif(not CRYPTOGRAPHY_AVAILABLE, reason="cryptography 库未安装")
 class TestAPFSEncryptedReader:
     """测试 APFS 加密卷读取器"""
     
@@ -202,25 +222,23 @@ class TestAPFSEncryptedReader:
         from src.core.crypto.real_crypto import APFSEncryptedReader
         assert APFSEncryptedReader is not None
     
-    def test_open_non_encrypted(self):
+    def test_open_non_encrypted(self, tmp_path):
         """测试打开非加密卷"""
         from src.core.crypto.real_crypto import APFSEncryptedReader
         
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            # 创建非加密卷
-            f.write(b'\x00' * 4096)
-            f.flush()
-            
-            reader = APFSEncryptedReader(f.name)
-            result = reader.open()
-            
-            assert result == False
-            assert reader.is_encrypted() == False
-            
-            reader.close()
-            os.unlink(f.name)
+        test_file = tmp_path / "test.img"
+        test_file.write_bytes(b'\x00' * 4096)
+        
+        reader = APFSEncryptedReader(str(test_file))
+        result = reader.open()
+        
+        assert result == False
+        assert reader.is_encrypted() == False
+        
+        reader.close()
 
 
+@pytest.mark.skipif(not CRYPTOGRAPHY_AVAILABLE, reason="cryptography 库未安装")
 class TestCoreStorageEncryptedReader:
     """测试 CoreStorage 加密卷读取器"""
     
@@ -229,25 +247,23 @@ class TestCoreStorageEncryptedReader:
         from src.core.crypto.real_crypto import CoreStorageEncryptedReader
         assert CoreStorageEncryptedReader is not None
     
-    def test_open_non_encrypted(self):
+    def test_open_non_encrypted(self, tmp_path):
         """测试打开非加密卷"""
         from src.core.crypto.real_crypto import CoreStorageEncryptedReader
         
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            # 创建非 CoreStorage 卷
-            f.write(b'\x00' * 4096)
-            f.flush()
-            
-            reader = CoreStorageEncryptedReader(f.name)
-            result = reader.open()
-            
-            assert result == False
-            assert reader.is_encrypted() == False
-            
-            reader.close()
-            os.unlink(f.name)
+        test_file = tmp_path / "test.img"
+        test_file.write_bytes(b'\x00' * 4096)
+        
+        reader = CoreStorageEncryptedReader(str(test_file))
+        result = reader.open()
+        
+        assert result == False
+        assert reader.is_encrypted() == False
+        
+        reader.close()
 
 
+@pytest.mark.skipif(not CRYPTOGRAPHY_AVAILABLE, reason="cryptography 库未安装")
 class TestEncryptionAvailability:
     """测试加密功能可用性"""
     
