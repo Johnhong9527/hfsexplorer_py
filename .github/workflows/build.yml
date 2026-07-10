@@ -31,7 +31,15 @@ jobs:
           pip install pyinstaller pytest
 
       - name: Run tests
-        run: python -m pytest tests/test_apfs.py tests/test_apfs_writer.py tests/test_btree.py tests/test_clipboard.py tests/test_copy_manager.py tests/test_dmg.py tests/test_e2e_flow.py tests/test_filevault2.py tests/test_formatter.py tests/test_full.py tests/test_hfs_volume_header.py tests/test_new_modules.py tests/test_partition.py tests/test_search.py tests/test_unhfs.py tests/test_write_integration.py tests/test_writer.py -v --tb=short || true
+        id: tests
+        run: |
+          python -m pytest tests/test_apfs.py tests/test_apfs_writer.py tests/test_btree.py tests/test_clipboard.py tests/test_copy_manager.py tests/test_dmg.py tests/test_e2e_flow.py tests/test_filevault2.py tests/test_formatter.py tests/test_full.py tests/test_hfs_volume_header.py tests/test_new_modules.py tests/test_partition.py tests/test_search.py tests/test_unhfs.py tests/test_write_integration.py tests/test_writer.py -v --tb=short
+          if errorlevel 1 (
+            echo ::warning::Tests failed, but build will continue
+            echo tests_failed=true >> %GITHUB_OUTPUT%
+          ) else (
+            echo tests_failed=false >> %GITHUB_OUTPUT%
+          )
 
       - name: Create resources directory
         run: if not exist resources mkdir resources
