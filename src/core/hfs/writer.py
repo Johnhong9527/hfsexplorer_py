@@ -459,6 +459,10 @@ class CatalogWriter:
         # 插入到 B-tree
         self.btree_writer.insert_record(key_bytes, record_bytes)
         
+        # 更新卷头的文件夹计数
+        self.volume_header.folder_count += 1
+        self._update_volume_header()
+        
         return folder_id
     
     def delete_entry(self, parent_id: int, name: str) -> bool:
@@ -482,8 +486,26 @@ class CatalogWriter:
         # 序列化键
         key_bytes = key.to_bytes()
         
+        # 查找记录以确定类型
+        leaf_node, record_index = self.btree_writer.mutator._find_record(key_bytes)
+        
+        is_folder = False
+        if leaf_node is not None:
+            record_data = leaf_node.get_record_data(record_index)
+            if len(record_data) > 0:
+                record_type = struct.unpack_from('>H', record_data, key.occupied_size)[0]
+                is_folder = (record_type == CatalogRecordType.FOLDER)
+        
         # 从 B-tree 删除
         self.btree_writer.delete_record(key_bytes)
+        
+        # 更新卷头的计数
+        if is_folder:
+            self.volume_header.folder_count -= 1
+        else:
+            self.volume_header.file_count -= 1
+        
+        self._update_volume_header()
         
         return True
     
@@ -531,6 +553,9 @@ class CatalogWriter:
         
         # 插入新记录
         self.btree_writer.insert_record(new_key_bytes, record_content)
+        
+        # 更新卷头
+        self._update_volume_header()
         
         return True
     
@@ -580,6 +605,9 @@ class CatalogWriter:
         
         # 插入新记录
         self.btree_writer.insert_record(new_key_bytes, record_content)
+        
+        # 更新卷头
+        self._update_volume_header()
         
         return True
     
