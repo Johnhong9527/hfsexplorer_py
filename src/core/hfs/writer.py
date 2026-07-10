@@ -26,7 +26,7 @@ from .btree import (
 )
 from .btree_mutator import BTreeMutator, BTreeMutationResult
 from .structures import HFSPlusVolumeHeader
-from .constants import CatalogNodeID, HFS_EPOCH_OFFSET
+from .constants import CatalogNodeID, HFS_EPOCH_OFFSET, VOLUME_HEADER_OFFSET, VOLUME_HEADER_SIZE
 
 
 class WriteError(Exception):
@@ -274,12 +274,45 @@ class CatalogWriter:
         # 构造 ExtendedFileInfo (8 字节)
         finderInfo = b'\x00' * 8
         
+        # 如果有数据，分配块并写入
+        start_block = 0
+        total_blocks = 0
+        if data:
+            block_size = self.volume_header.block_size
+            blocks_needed = (len(data) + block_size - 1) // block_size
+            
+            # 分配块
+            allocated_blocks = self._allocate_blocks(blocks_needed)
+            if allocated_blocks:
+                start_block = allocated_blocks[0]
+                total_blocks = len(allocated_blocks)
+                
+                # 写入数据到分配的块
+                for i, block_num in enumerate(allocated_blocks):
+                    block_offset = block_num * block_size
+                    start = i * block_size
+                    end = min(start + block_size, len(data))
+                    block_data = data[start:end]
+                    
+                    # 填充到块大小
+                    if len(block_data) < block_size:
+                        block_data = block_data + b'\x00' * (block_size - len(block_data))
+                    
+                    self.stream.seek(block_offset)
+                    self.stream.write(block_data)
+        
         # 构造数据分支 (80 字节)
         # logicalSize(8) + clumpSize(4) + totalBlocks(4) + extents(64)
         data_fork = struct.pack('>Q', len(data))  # logicalSize
         data_fork += struct.pack('>I', 0)  # clumpSize
-        data_fork += struct.pack('>I', 0)  # totalBlocks
-        data_fork += b'\x00' * 64  # 8 个 extent 描述符
+        data_fork += struct.pack('>I', total_blocks)  # totalBlocks
+        
+        # 第一个 extent 描述符
+        if total_blocks > 0:
+            data_fork += struct.pack('>II', start_block, total_blocks)  # extent 1
+            data_fork += b'\x00' * 56  # 剩余 7 个 extent
+        else:
+            data_fork += b'\x00' * 64  # 8 个 extent 描述符
         
         # 构造资源分支 (80 字节)
         resource_fork = struct.pack('>Q', 0)  # logicalSize
@@ -314,7 +347,58 @@ class CatalogWriter:
         # 插入到 B-tree
         self.btree_writer.insert_record(key_bytes, record_bytes)
         
+        # 更新卷头的文件计数
+        self.volume_header.file_count += 1
+        self._update_volume_header()
+        
         return file_id
+    
+    def _allocate_blocks(self, count: int) -> List[int]:
+        """
+        分配块
+        
+        Args:
+            count: 需要的块数
+        
+        Returns:
+            分配的块号列表
+        """
+        # 简化实现：从下一个分配位置开始分配
+        start = self.volume_header.next_allocation
+        block_size = self.volume_header.block_size
+        total_blocks = self.volume_header.total_blocks
+        
+        # 查找空闲块
+        allocated = []
+        current = start
+        
+        while len(allocated) < count and current < total_blocks:
+            # 检查块是否空闲（简化：假设空闲）
+            allocated.append(current)
+            current += 1
+        
+        if len(allocated) < count:
+            return []  # 没有足够的空闲块
+        
+        # 更新卷头
+        self.volume_header.free_blocks -= count
+        self.volume_header.next_allocation = current
+        
+        return allocated
+    
+    def _update_volume_header(self):
+        """更新卷头"""
+        self.volume_header.modify_date = self._get_current_date()
+        self.volume_header.write_count += 1
+        
+        # 写入卷头
+        self.stream.seek(VOLUME_HEADER_OFFSET)
+        self.stream.write(self.volume_header.to_bytes())
+        
+        # 写入备份卷头
+        backup_offset = self.volume_header.volume_size - VOLUME_HEADER_SIZE
+        self.stream.seek(backup_offset)
+        self.stream.write(self.volume_header.to_bytes())
     
     def create_folder(self, parent_id: int, name: str) -> int:
         """
