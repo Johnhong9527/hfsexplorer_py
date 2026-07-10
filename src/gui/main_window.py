@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QStyle, QAbstractItemView, QProgressDialog,
     QMenu, QInputDialog, QDialog, QComboBox
 )
+from PyQt6.QtGui import QActionGroup
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer, QMimeData, QUrl
 from PyQt6.QtGui import QAction, QIcon, QPixmap, QKeySequence, QCursor, QDragEnterEvent, QDropEvent
 
@@ -62,6 +63,7 @@ from src.core.crypto import (
 from src.gui.panels.info_panels import FilePropertiesPanel
 from src.gui.dialogs.password_dialog import PasswordDialog
 from src.gui.views.view_manager import ViewManager, ViewMode
+from src.gui.i18n import t, set_language, get_language, get_available_languages
 
 try:
     from src.core.dmg import DMGImage, DMGError
@@ -208,21 +210,52 @@ class MainWindow(QMainWindow):
         # 加载线程
         self.load_thread: Optional[FileLoadThread] = None
         self.folder_thread: Optional[FolderLoadThread] = None
+        
+        # 显示欢迎引导（首次运行）
+        QTimer.singleShot(500, self._show_welcome_if_first_run)
+    
+    def _show_welcome_if_first_run(self):
+        """首次运行时显示欢迎引导"""
+        import json
+        config_dir = os.path.expanduser('~/.config/hfsexplorer')
+        config_file = os.path.join(config_dir, 'settings.json')
+        
+        # 检查是否是首次运行
+        if not os.path.exists(config_file):
+            os.makedirs(config_dir, exist_ok=True)
+            # 保存设置
+            with open(config_file, 'w') as f:
+                json.dump({'first_run': False, 'language': get_language()}, f)
+            # 显示欢迎引导
+            self._show_welcome()
     
     def _setup_menus(self):
         """设置菜单栏"""
         menubar = self.menuBar()
         
-        # 文件菜单
-        file_menu = menubar.addMenu("文件(&F)")
+        # 语言菜单
+        lang_menu = menubar.addMenu("语言/Language")
+        lang_group = QActionGroup(self)
+        lang_group.setExclusive(True)
         
-        open_action = QAction("打开(&O)...", self)
+        for lang_code, lang_name in get_available_languages().items():
+            action = QAction(lang_name, self)
+            action.setCheckable(True)
+            action.setChecked(lang_code == get_language())
+            action.triggered.connect(lambda checked, lc=lang_code: self._change_language(lc))
+            lang_group.addAction(action)
+            lang_menu.addAction(action)
+        
+        # 文件菜单
+        file_menu = menubar.addMenu(t('menu.file'))
+        
+        open_action = QAction(t('menu.file.open'), self)
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._open_file)
         file_menu.addAction(open_action)
         
         # 打开设备
-        open_device_action = QAction("打开设备(&D)...", self)
+        open_device_action = QAction(t('menu.file.open_device'), self)
         open_device_action.setShortcut("Ctrl+D")
         open_device_action.triggered.connect(self._open_device)
         file_menu.addAction(open_device_action)
@@ -230,21 +263,21 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         
         # 新建子菜单
-        new_menu = file_menu.addMenu("新建(&N)")
+        new_menu = file_menu.addMenu(t('menu.file.new'))
         
-        new_file_action = QAction("新建文件(&F)...", self)
+        new_file_action = QAction(t('menu.file.new_file'), self)
         new_file_action.setShortcut("Ctrl+N")
         new_file_action.triggered.connect(self._create_new_file)
         new_menu.addAction(new_file_action)
         
-        new_folder_action = QAction("新建文件夹(&D)...", self)
+        new_folder_action = QAction(t('menu.file.new_folder'), self)
         new_folder_action.setShortcut("Ctrl+Shift+N")
         new_folder_action.triggered.connect(self._create_new_folder)
         new_menu.addAction(new_folder_action)
         
         file_menu.addSeparator()
         
-        extract_action = QAction("提取(&E)...", self)
+        extract_action = QAction(t('menu.file.extract'), self)
         extract_action.setShortcut("Ctrl+E")
         extract_action.triggered.connect(self._extract_selected)
         file_menu.addAction(extract_action)
@@ -252,27 +285,27 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         
         # 格式化选项
-        format_action = QAction("格式化(&F)...", self)
+        format_action = QAction(t('menu.file.format'), self)
         format_action.triggered.connect(self._show_format_dialog)
         file_menu.addAction(format_action)
         
         file_menu.addSeparator()
         
         # 最近文件子菜单
-        self.recent_menu = file_menu.addMenu("最近打开(&R)")
+        self.recent_menu = file_menu.addMenu(t('menu.file.recent'))
         self._update_recent_menu()
         
         file_menu.addSeparator()
         
-        exit_action = QAction("退出(&X)", self)
+        exit_action = QAction(t('menu.file.exit'), self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
         # 工具菜单
-        tools_menu = menubar.addMenu("工具(&T)")
+        tools_menu = menubar.addMenu(t('menu.tools'))
         
-        search_action = QAction("搜索(&S)...", self)
+        search_action = QAction(t('menu.tools.search'), self)
         search_action.setShortcut("Ctrl+F")
         search_action.triggered.connect(self._show_search_dialog)
         tools_menu.addAction(search_action)
@@ -280,27 +313,27 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         
         # 视图模式子菜单
-        view_menu = tools_menu.addMenu("视图模式(&V)")
+        view_menu = tools_menu.addMenu(t('menu.tools.view_mode'))
         
-        icon_view_action = QAction("图标视图", self)
+        icon_view_action = QAction(t('menu.tools.view_icon'), self)
         icon_view_action.triggered.connect(lambda: self._set_view_mode(ViewMode.ICON))
         view_menu.addAction(icon_view_action)
         
-        list_view_action = QAction("列表视图", self)
+        list_view_action = QAction(t('menu.tools.view_list'), self)
         list_view_action.triggered.connect(lambda: self._set_view_mode(ViewMode.LIST))
         view_menu.addAction(list_view_action)
         
-        column_view_action = QAction("分栏视图", self)
+        column_view_action = QAction(t('menu.tools.view_column'), self)
         column_view_action.triggered.connect(lambda: self._set_view_mode(ViewMode.COLUMN))
         view_menu.addAction(column_view_action)
         
-        gallery_view_action = QAction("画廊视图", self)
+        gallery_view_action = QAction(t('menu.tools.view_gallery'), self)
         gallery_view_action.triggered.connect(lambda: self._set_view_mode(ViewMode.GALLERY))
         view_menu.addAction(gallery_view_action)
         
         tools_menu.addSeparator()
         
-        info_action = QAction("卷信息(&I)...", self)
+        info_action = QAction(t('menu.tools.volume_info'), self)
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self._show_volume_info)
         tools_menu.addAction(info_action)
@@ -308,15 +341,15 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         
         # 预览功能
-        preview_action = QAction("预览文件(&P)", self)
+        preview_action = QAction(t('menu.tools.preview'), self)
         preview_action.setShortcut("Space")
         preview_action.triggered.connect(self._preview_file)
         tools_menu.addAction(preview_action)
         
         # 帮助菜单
-        help_menu = menubar.addMenu("帮助(&H)")
+        help_menu = menubar.addMenu(t('menu.help'))
         
-        help_action = QAction("帮助主题(&H)...", self)
+        help_action = QAction(t('menu.help.topics'), self)
         help_action.setShortcut("F1")
         help_action.triggered.connect(self._show_help)
         help_menu.addAction(help_action)
@@ -1851,20 +1884,29 @@ class MainWindow(QMainWindow):
         dialog = HelpBrowserDialog(self)
         dialog.exec()
     
+    def _change_language(self, language: str):
+        """切换语言"""
+        set_language(language)
+        QMessageBox.information(
+            self,
+            "Language" if language == 'en' else "语言",
+            "Language changed. Please restart the application." if language == 'en' else "语言已更改，请重启应用程序。"
+        )
+    
+    def _show_welcome(self):
+        """显示欢迎引导"""
+        QMessageBox.information(
+            self,
+            t('welcome.title'),
+            t('welcome.message')
+        )
+    
     def _show_about(self):
         """显示关于对话框"""
         QMessageBox.about(
             self,
-            "关于 HFSExplorer",
-            "HFSExplorer (Alpha)\n\n"
-            "HFS+/HFSX 文件系统浏览器，支持读写操作。\n\n"
-            "功能:\n"
-            "- 浏览 HFS+/HFSX 卷\n"
-            "- 提取文件和文件夹\n"
-            "- 创建、删除、重命名文件和文件夹\n"
-            "- 搜索功能\n\n"
-            "当前状态：Alpha 原型。\n"
-            "原作者: Erik Larsson (Catacombae Software)"
+            t('about.title'),
+            t('about.text')
         )
     
     def _show_search_dialog(self):
