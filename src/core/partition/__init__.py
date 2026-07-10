@@ -277,6 +277,8 @@ MBR_TYPE_FAT16_LBA = 0x0E
 MBR_TYPE_NTFS = 0x07
 MBR_TYPE_LINUX = 0x83
 MBR_TYPE_HFS = 0xAF
+MBR_TYPE_EXTENDED = 0x05
+MBR_TYPE_EXTENDED_LBA = 0x0F
 MBR_TYPE_GPT = 0xEE
 
 
@@ -348,6 +350,89 @@ def parse_mbr(stream, sector_size: int = 512) -> List[PartitionEntry]:
             partition_type=f"0x{partition_type:02X}",
             is_hfs=is_hfs
         ))
+    
+    # 检查是否有扩展分区，解析 EBR
+    extended_partitions = _parse_ebr(mbr_data, stream, sector_size)
+    partitions.extend(extended_partitions)
+    
+    return partitions
+
+
+def _parse_ebr(mbr_data: bytes, stream, sector_size: int = 512) -> List[PartitionEntry]:
+    """
+    解析 Extended Boot Record (EBR)
+    
+    EBR 链式结构用于支持超过 4 个主分区。
+    
+    Args:
+        mbr_data: MBR 数据
+        stream: 二进制流
+        sector_size: 扇区大小
+    
+    Returns:
+        扩展分区内的逻辑分区列表
+    """
+    partitions = []
+    
+    # 查找扩展分区
+    extended_lba = 0
+    for i in range(4):
+        entry_offset = 446 + i * 16
+        partition_type = mbr_data[entry_offset + 4]
+        
+        if partition_type in (MBR_TYPE_EXTENDED, MBR_TYPE_EXTENDED_LBA):
+            extended_lba = struct.unpack_from('<I', mbr_data, entry_offset + 8)[0]
+            break
+    
+    if extended_lba == 0:
+        return partitions
+    
+    # 遍历 EBR 链
+    current_ebr_lba = extended_lba
+    logical_index = 1
+    
+    while current_ebr_lba != 0:
+        # 读取 EBR
+        stream.seek(current_ebr_lba * sector_size)
+        ebr_data = stream.read(sector_size)
+        
+        if len(ebr_data) < sector_size:
+            break
+        
+        # 检查签名
+        if ebr_data[510:512] != b'\x55\xAA':
+            break
+        
+        # 解析第一个条目（逻辑分区）
+        entry_data = ebr_data[446:462]
+        partition_type = entry_data[4]
+        
+        if partition_type != 0:
+            start_lba = struct.unpack_from('<I', entry_data, 8)[0]
+            size_sectors = struct.unpack_from('<I', entry_data, 12)[0]
+            type_name = _get_mbr_type_name(partition_type)
+            is_hfs = partition_type == MBR_TYPE_HFS
+            
+            partitions.append(PartitionEntry(
+                name=f"Logical {logical_index}",
+                type_name=type_name,
+                start_lba=current_ebr_lba + start_lba,
+                size_sectors=size_sectors,
+                partition_type=f"0x{partition_type:02X}",
+                is_hfs=is_hfs
+            ))
+            
+            logical_index += 1
+        
+        # 解析第二个条目（下一个 EBR）
+        next_entry = ebr_data[462:478]
+        next_type = next_entry[4]
+        
+        if next_type in (MBR_TYPE_EXTENDED, MBR_TYPE_EXTENDED_LBA):
+            next_lba = struct.unpack_from('<I', next_entry, 8)[0]
+            current_ebr_lba = extended_lba + next_lba
+        else:
+            current_ebr_lba = 0
     
     return partitions
 

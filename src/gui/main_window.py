@@ -312,6 +312,13 @@ class MainWindow(QMainWindow):
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
         
+        help_action = QAction("帮助主题(&H)...", self)
+        help_action.setShortcut("F1")
+        help_action.triggered.connect(self._show_help)
+        help_menu.addAction(help_action)
+        
+        help_menu.addSeparator()
+        
         about_action = QAction("关于(&A)...", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
@@ -1682,6 +1689,12 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(button_layout)
         
+        dialog.exec()
+    
+    def _show_help(self):
+        """显示帮助浏览器"""
+        from src.gui.dialogs.help_browser import HelpBrowserDialog
+        dialog = HelpBrowserDialog(self)
         dialog.exec()
     
     def _show_about(self):
