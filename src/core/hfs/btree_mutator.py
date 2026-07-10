@@ -146,7 +146,7 @@ class BTreeMutator:
             self._write_node(leaf_node)
             
             # 检查是否需要合并
-            if self._node_underflow(leaf_node):
+            if self._handle_underflow(leaf_node):
                 self._handle_underflow(leaf_node)
             
             return BTreeMutationResult(
@@ -987,7 +987,7 @@ class BTreeMutator:
                 self._write_node(parent_node)
                 
                 # 检查是否需要处理下溢
-                if self._node_underflow(parent_node):
+                if self._handle_underflow(parent_node):
                     self._handle_underflow(parent_node)
                 
                 break

@@ -142,18 +142,34 @@ def extract_files(volume: HFSPlusVolume, output_dir: str,
     # 获取要提取的文件列表
     files = list_files(volume, path, recursive)
     
+    # 构建路径映射，用于跟踪目录结构
+    path_stack = []
+    
     for file_info in files:
-        # 构建输出路径
-        if path == '/':
+        # 根据缩进级别调整路径栈
+        indent = file_info['indent']
+        while len(path_stack) > indent:
+            path_stack.pop()
+        
+        # 构建相对路径
+        if indent == 0:
             rel_path = file_info['name']
         else:
-            rel_path = path.rstrip('/') + '/' + file_info['name']
+            # 使用路径栈构建完整路径
+            rel_path = os.path.join(*path_stack, file_info['name']) if path_stack else file_info['name']
         
         output_path = os.path.join(output_dir, rel_path)
         
         if file_info['type'] == 'folder':
             # 创建目录
             os.makedirs(output_path, exist_ok=True)
+            
+            # 更新路径栈
+            if indent == 0:
+                path_stack = [file_info['name']]
+            else:
+                path_stack.append(file_info['name'])
+            
             if verbose:
                 print(f"  目录: {rel_path}/")
         else:

@@ -845,3 +845,235 @@ class VolumeWriter:
     def increment_write_count(self):
         """增加写入计数"""
         self.volume_header.write_count += 1
+
+
+class CopyManager:
+    """
+    复制管理器
+    
+    用于处理文件和文件夹的复制操作。
+    
+    Usage:
+        manager = CopyManager(catalog_writer, volume)
+        manager.copy_entry(src_parent_id, src_name, dst_parent_id, dst_name)
+    """
+    
+    def __init__(self, catalog_writer: 'CatalogWriter', volume: 'HFSPlusVolume'):
+        """
+        初始化复制管理器
+        
+        Args:
+            catalog_writer: Catalog 写入器
+            volume: HFS+ 卷
+        """
+        self.catalog_writer = catalog_writer
+        self.volume = volume
+    
+    def copy_entry(self, src_parent_id: int, src_name: str,
+                   dst_parent_id: int, dst_name: str) -> int:
+        """
+        复制条目
+        
+        Args:
+            src_parent_id: 源父文件夹 CNID
+            src_name: 源名称
+            dst_parent_id: 目标父文件夹 CNID
+            dst_name: 目标名称
+        
+        Returns:
+            新条目的 CNID
+        """
+        # 查找源记录
+        src_key = HFSPlusCatalogKey(
+            key_length=6 + len(src_name) * 2,
+            parent_id=src_parent_id,
+            node_name=src_name
+        )
+        
+        src_key_bytes = src_key.to_bytes()
+        leaf_node, record_index = self.catalog_writer.btree_writer.mutator._find_record(src_key_bytes)
+        
+        if leaf_node is None:
+            raise WriteError(f"未找到源记录: {src_name}")
+        
+        # 获取源记录数据
+        record_data = leaf_node.get_record_data(record_index)
+        key_length = struct.unpack_from('>H', record_data, 0)[0]
+        record_content = record_data[2 + key_length:]
+        
+        # 检查记录类型
+        record_type = struct.unpack_from('>H', record_content, 0)[0]
+        
+        if record_type == CatalogRecordType.FOLDER:
+            # 复制文件夹
+            return self._copy_folder(src_parent_id, src_name, dst_parent_id, dst_name)
+        elif record_type == CatalogRecordType.FILE:
+            # 复制文件
+            return self._copy_file(src_parent_id, src_name, dst_parent_id, dst_name)
+        else:
+            raise WriteError(f"未知的记录类型: {record_type}")
+    
+    def _copy_file(self, src_parent_id: int, src_name: str,
+                   dst_parent_id: int, dst_name: str) -> int:
+        """
+        复制文件
+        
+        Args:
+            src_parent_id: 源父文件夹 CNID
+            src_name: 源文件名
+            dst_parent_id: 目标父文件夹 CNID
+            dst_name: 目标文件名
+        
+        Returns:
+            新文件的 CNID
+        """
+        # 查找源文件记录
+        src_key = HFSPlusCatalogKey(
+            key_length=6 + len(src_name) * 2,
+            parent_id=src_parent_id,
+            node_name=src_name
+        )
+        
+        src_key_bytes = src_key.to_bytes()
+        leaf_node, record_index = self.catalog_writer.btree_writer.mutator._find_record(src_key_bytes)
+        
+        if leaf_node is None:
+            raise WriteError(f"未找到源文件: {src_name}")
+        
+        # 获取源文件记录
+        record_data = leaf_node.get_record_data(record_index)
+        key_length = struct.unpack_from('>H', record_data, 0)[0]
+        record_content = record_data[2 + key_length:]
+        
+        # 解析源文件记录
+        src_file = HFSPlusCatalogFile.from_bytes(record_data, 2 + key_length)
+        
+        # 读取源文件数据
+        file_data = b''
+        if src_file.file_id > 0:
+            try:
+                file_data = self.volume.read_file(src_file.file_id)
+            except Exception:
+                file_data = b''
+        
+        # 创建新文件
+        new_file_id = self.catalog_writer.create_file(dst_parent_id, dst_name, file_data)
+        
+        return new_file_id
+    
+    def _copy_folder(self, src_parent_id: int, src_name: str,
+                     dst_parent_id: int, dst_name: str) -> int:
+        """
+        复制文件夹（递归）
+        
+        Args:
+            src_parent_id: 源父文件夹 CNID
+            src_name: 源文件夹名
+            dst_parent_id: 目标父文件夹 CNID
+            dst_name: 目标文件夹名
+        
+        Returns:
+            新文件夹的 CNID
+        """
+        # 查找源文件夹记录
+        src_key = HFSPlusCatalogKey(
+            key_length=6 + len(src_name) * 2,
+            parent_id=src_parent_id,
+            node_name=src_name
+        )
+        
+        src_key_bytes = src_key.to_bytes()
+        leaf_node, record_index = self.catalog_writer.btree_writer.mutator._find_record(src_key_bytes)
+        
+        if leaf_node is None:
+            raise WriteError(f"未找到源文件夹: {src_name}")
+        
+        # 获取源文件夹记录
+        record_data = leaf_node.get_record_data(record_index)
+        key_length = struct.unpack_from('>H', record_data, 0)[0]
+        record_content = record_data[2 + key_length:]
+        
+        # 解析源文件夹记录
+        src_folder = HFSPlusCatalogFolder.from_bytes(record_data, 2 + key_length)
+        
+        # 创建新文件夹
+        new_folder_id = self.catalog_writer.create_folder(dst_parent_id, dst_name)
+        
+        # 获取源文件夹内容
+        contents = self.volume.list_folder(src_folder.folder_id)
+        
+        # 递归复制内容
+        for item in contents:
+            item_name = item['name']
+            item_type = item['type']
+            
+            if item_type == 'folder':
+                # 复制子文件夹
+                self._copy_folder(src_folder.folder_id, item_name,
+                                 new_folder_id, item_name)
+            else:
+                # 复制文件
+                self._copy_file(src_folder.folder_id, item_name,
+                               new_folder_id, item_name)
+        
+        return new_folder_id
+    
+    def copy_entry_to(self, src_parent_id: int, src_name: str,
+                      dst_parent_id: int) -> int:
+        """
+        复制条目到目标文件夹（保持原名）
+        
+        Args:
+            src_parent_id: 源父文件夹 CNID
+            src_name: 源名称
+            dst_parent_id: 目标父文件夹 CNID
+        
+        Returns:
+            新条目的 CNID
+        """
+        return self.copy_entry(src_parent_id, src_name, dst_parent_id, src_name)
+    
+    def duplicate_entry(self, parent_id: int, name: str) -> int:
+        """
+        复制条目（在同一文件夹下创建副本）
+        
+        Args:
+            parent_id: 父文件夹 CNID
+            name: 条目名称
+        
+        Returns:
+            新条目的 CNID
+        """
+        # 生成副本名称
+        base_name, ext = os.path.splitext(name)
+        copy_name = f"{base_name} 副本{ext}"
+        
+        # 检查名称是否已存在
+        counter = 1
+        while self._entry_exists(parent_id, copy_name):
+            counter += 1
+            copy_name = f"{base_name} 副本 {counter}{ext}"
+        
+        return self.copy_entry(parent_id, name, parent_id, copy_name)
+    
+    def _entry_exists(self, parent_id: int, name: str) -> bool:
+        """
+        检查条目是否存在
+        
+        Args:
+            parent_id: 父文件夹 CNID
+            name: 条目名称
+        
+        Returns:
+            是否存在
+        """
+        key = HFSPlusCatalogKey(
+            key_length=6 + len(name) * 2,
+            parent_id=parent_id,
+            node_name=name
+        )
+        
+        key_bytes = key.to_bytes()
+        leaf_node, record_index = self.catalog_writer.btree_writer.mutator._find_record(key_bytes)
+        
+        return leaf_node is not None

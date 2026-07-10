@@ -9,6 +9,7 @@
 - **跨平台**：支持 Windows 和 Linux
 - **独立安装包**：不需要预先安装 Java 或其他运行时
 - **HFS+/HFSX 读取**：浏览、搜索、提取文件
+- **APFS 支持**：Apple 新文件系统读取支持
 - **分区表支持**：APM、GPT、MBR 自动检测和解析
 - **基础写入**：创建文件和文件夹（框架已实现并验证）
 - **格式化**：创建新的 HFS+ 文件系统
@@ -76,6 +77,7 @@ print(f"总块数: {header.total_blocks}, 空闲块: {header.free_blocks}")
 | **HFS+ 格式化** | 创建新的 HFS+ 文件系统 |
 | **格式化对话框** | GUI 格式化界面 |
 | **DMG 镜像支持** | 读取 Apple Disk Image |
+| **APFS 支持** | Apple File System 读取支持 |
 | 打包构建 | PyInstaller、deb、AppImage |
 
 ### ⚠️ 框架已实现（未充分测试）
@@ -90,9 +92,9 @@ print(f"总块数: {header.total_blocks}, 空闲块: {header.free_blocks}")
 | 功能 | 说明 |
 |------|------|
 | DMG 镜像支持 | UDIF、稀疏镜像 |
-| APFS 支持 | Apple File System |
 | HFS Classic 支持 | 旧版 HFS 文件系统 |
 | 命令行工具 `unhfs` | CLI 批量操作 |
+| APFS 高级特性 | 加密、快照、克隆等 |
 
 ## 开发
 
@@ -109,6 +111,12 @@ hfsexplorer-rewrite/
 │   │   │   ├── reader.py         # 读取器
 │   │   │   ├── extractor.py      # 文件提取器
 │   │   │   └── search.py         # 搜索引擎
+│   │   ├── apfs/          # APFS 支持
+│   │   │   ├── __init__.py       # 模块入口
+│   │   │   ├── structures.py     # 数据结构定义
+│   │   │   ├── reader.py         # 读取器
+│   │   │   ├── container.py      # 容器管理
+│   │   │   └── volume.py         # 卷管理
 │   │   ├── partition/     # 分区表解析
 │   │   │   └── __init__.py       # APM/GPT/MBR
 │   │   ├── dmg/           # DMG 支持（空）
@@ -121,7 +129,7 @@ hfsexplorer-rewrite/
 │   │   └── dialogs/       # 对话框
 │   ├── cli/               # 命令行工具（空）
 │   └── platform/          # 平台特定代码（空）
-├── tests/                 # 测试（106 个）
+├── tests/                 # 测试（196 个）
 ├── resources/             # 资源文件
 └── dist/                  # 打包输出
 ```
@@ -139,6 +147,7 @@ pytest --cov=src
 pytest tests/test_btree.py
 pytest tests/test_writer.py
 pytest tests/test_partition.py
+pytest tests/test_apfs.py
 ```
 
 ### 代码质量

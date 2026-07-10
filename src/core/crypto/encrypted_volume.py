@@ -5,7 +5,7 @@ HFS+ 加密卷解析器
 """
 
 import struct
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict, Any
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -60,6 +60,11 @@ class Keybag:
     def _parse(self):
         """解析密钥包"""
         offset = 0
+        
+        # 检查是否有签名 'kbag'
+        if len(self.data) >= 8 and self.data[0:4] == b'kbag':
+            # 跳过签名（4字节）和大小（4字节）
+            offset = 8
         
         while offset < len(self.data):
             # 检查是否有足够的数据
@@ -339,11 +344,22 @@ class EncryptedVolumeParser:
     
     用于解析 FileVault 2 加密卷。
     
+    FileVault 2 使用 CoreStorage 逻辑卷管理器，密钥包结构：
+    - 物理卷头部（偏移 0）
+    - 密钥包描述符（偏移 512）
+    - 密钥包数据
+    
     Usage:
         parser = EncryptedVolumeParser(stream)
         volume = parser.parse()
         volume.unlock(password)
     """
+    
+    # CoreStorage 密钥包签名
+    KEYBAG_SIGNATURE = b'kbag'
+    
+    # 密钥包描述符大小
+    KEYBAG_DESC_SIZE = 512
     
     def __init__(self, stream):
         """
@@ -376,8 +392,6 @@ class EncryptedVolumeParser:
             raise CryptoError("卷未加密")
         
         # 读取密钥包
-        # 注意：密钥包的位置取决于具体的实现
-        # 这里简化处理，假设密钥包在卷的某个固定位置
         keybag_data = self._read_keybag()
         
         # 解析密钥包
@@ -391,10 +405,183 @@ class EncryptedVolumeParser:
         
         Returns:
             密钥包数据
-        """
-        # 注意：这里简化了实现
-        # 实际需要根据 CoreStorage 的格式来读取密钥包
-        # 密钥包通常存储在卷的元数据区域
         
-        # 这里返回一个空的密钥包作为占位
-        return b''
+        Raises:
+            CryptoError: 如果无法找到密钥包
+        """
+        # 方法1：从卷头获取密钥包位置
+        keybag_offset = self._find_keybag_from_header()
+        if keybag_offset is not None:
+            return self._read_keybag_at_offset(keybag_offset)
+        
+        # 方法2：扫描卷查找密钥包签名
+        keybag_offset = self._scan_for_keybag()
+        if keybag_offset is not None:
+            return self._read_keybag_at_offset(keybag_offset)
+        
+        # 方法3：使用常见的密钥包位置
+        for offset in [512, 4096, 1024, 2048]:
+            try:
+                data = self._read_keybag_at_offset(offset)
+                if len(data) > 0:
+                    return data
+            except:
+                continue
+        
+        raise CryptoError("无法找到密钥包")
+    
+    def _find_keybag_from_header(self) -> Optional[int]:
+        """
+        从卷头获取密钥包位置
+        
+        Returns:
+            密钥包偏移，如果未找到则返回 None
+        """
+        # 读取卷头的扩展区域
+        self.stream.seek(0)
+        header_data = self.stream.read(512)
+        
+        # 检查是否有密钥包偏移字段（位置可能因版本而异）
+        # CoreStorage 头部通常在偏移 88 开始
+        if len(header_data) < 512:
+            return None
+        
+        # 查找密钥包描述符
+        # 在某些实现中，密钥包描述符紧跟在卷头之后
+        self.stream.seek(512)
+        desc_data = self.stream.read(512)
+        
+        if len(desc_data) >= 512:
+            # 检查是否是密钥包描述符
+            if desc_data[0:4] == self.KEYBAG_SIGNATURE:
+                return 512
+        
+        return None
+    
+    def _scan_for_keybag(self, max_scan_mb: int = 10) -> Optional[int]:
+        """
+        扫描卷查找密钥包签名
+        
+        Args:
+            max_scan_mb: 最大扫描范围（MB）
+        
+        Returns:
+            密钥包偏移，如果未找到则返回 None
+        """
+        # 获取流大小
+        self.stream.seek(0, 2)
+        stream_size = self.stream.tell()
+        
+        # 限制扫描范围
+        scan_size = min(max_scan_mb * 1024 * 1024, stream_size)
+        
+        # 从开头扫描
+        self.stream.seek(0)
+        buffer = b''
+        chunk_size = 4096
+        
+        for offset in range(0, scan_size, chunk_size):
+            self.stream.seek(offset)
+            chunk = self.stream.read(chunk_size)
+            
+            if len(chunk) < 4:
+                break
+            
+            # 在块中查找签名
+            pos = chunk.find(self.KEYBAG_SIGNATURE)
+            if pos >= 0:
+                # 验证找到的位置是否是有效的密钥包
+                keybag_offset = offset + pos
+                if self._validate_keybag_at_offset(keybag_offset):
+                    return keybag_offset
+        
+        return None
+    
+    def _validate_keybag_at_offset(self, offset: int) -> bool:
+        """
+        验证指定偏移处是否是有效的密钥包
+        
+        Args:
+            offset: 偏移量
+        
+        Returns:
+            是否是有效的密钥包
+        """
+        try:
+            self.stream.seek(offset)
+            data = self.stream.read(16)
+            
+            if len(data) < 16:
+                return False
+            
+            # 检查签名
+            if data[0:4] != self.KEYBAG_SIGNATURE:
+                return False
+            
+            # 检查大小是否合理
+            size = struct.unpack_from('>I', data, 4)[0]
+            if size < 16 or size > 1024 * 1024:  # 最大 1MB
+                return False
+            
+            return True
+        except:
+            return False
+    
+    def _read_keybag_at_offset(self, offset: int) -> bytes:
+        """
+        读取指定偏移处的密钥包
+        
+        Args:
+            offset: 密钥包偏移
+        
+        Returns:
+            密钥包数据
+        """
+        # 读取密钥包描述符
+        self.stream.seek(offset)
+        desc_data = self.stream.read(self.KEYBAG_DESC_SIZE)
+        
+        if len(desc_data) < self.KEYBAG_DESC_SIZE:
+            raise CryptoError("无法读取密钥包描述符")
+        
+        # 解析密钥包描述符
+        signature = desc_data[0:4]
+        if signature != self.KEYBAG_SIGNATURE:
+            raise CryptoError(f"无效的密钥包签名: {signature}")
+        
+        # 获取密钥包大小
+        keybag_size = struct.unpack_from('>I', desc_data, 4)[0]
+        
+        if keybag_size < 16 or keybag_size > 1024 * 1024:
+            raise CryptoError(f"无效的密钥包大小: {keybag_size}")
+        
+        # 读取完整的密钥包
+        self.stream.seek(offset)
+        keybag_data = self.stream.read(keybag_size)
+        
+        if len(keybag_data) < keybag_size:
+            raise CryptoError("无法读取完整的密钥包")
+        
+        return keybag_data
+    
+    def _parse_keybag_header(self, data: bytes) -> Dict[str, Any]:
+        """
+        解析密钥包头部
+        
+        Args:
+            data: 密钥包数据
+        
+        Returns:
+            头部信息字典
+        """
+        if len(data) < 16:
+            raise CryptoError("密钥包数据太短")
+        
+        signature = data[0:4]
+        size = struct.unpack_from('>I', data, 4)[0]
+        
+        return {
+            'signature': signature,
+            'size': size,
+            'data': data,
+        }

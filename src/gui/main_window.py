@@ -64,6 +64,18 @@ from src.gui.panels.info_panels import FilePropertiesPanel
 from src.gui.dialogs.password_dialog import PasswordDialog
 from src.gui.views.view_manager import ViewManager, ViewMode
 from src.gui.i18n import t, set_language, get_language, get_available_languages
+from src.gui.clipboard_manager import ClipboardManager, ClipboardItem, ClipboardOperation
+
+from src.core.unified_fs import (
+    UnifiedVolume,
+    UnifiedFileSystem,
+    FileSystemType,
+    FileSystemDetector,
+    open_volume,
+    detect_filesystem,
+    get_supported_filesystems,
+    is_supported,
+)
 
 try:
     from src.core.dmg import DMGImage, DMGError
@@ -202,6 +214,9 @@ class MainWindow(QMainWindow):
         self.max_recent_files = 10
         self._load_recent_files()
         
+        # 剪贴板管理器
+        self.clipboard_manager = ClipboardManager()
+        
         # 初始化 UI
         self._setup_menus()
         self._setup_toolbar()
@@ -289,6 +304,29 @@ class MainWindow(QMainWindow):
         format_action = QAction(t('menu.file.format'), self)
         format_action.triggered.connect(self._show_format_dialog)
         file_menu.addAction(format_action)
+        
+        file_menu.addSeparator()
+        
+        # 复制/粘贴/剪切
+        copy_action = QAction(t('menu.edit.copy'), self)
+        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        copy_action.triggered.connect(self._copy_selected)
+        file_menu.addAction(copy_action)
+        
+        cut_action = QAction(t('menu.edit.cut'), self)
+        cut_action.setShortcut(QKeySequence.StandardKey.Cut)
+        cut_action.triggered.connect(self._cut_selected)
+        file_menu.addAction(cut_action)
+        
+        paste_action = QAction(t('menu.edit.paste'), self)
+        paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+        paste_action.triggered.connect(self._paste_items)
+        file_menu.addAction(paste_action)
+        
+        duplicate_action = QAction(t('menu.edit.duplicate'), self)
+        duplicate_action.setShortcut("Ctrl+Shift+D")
+        duplicate_action.triggered.connect(self._duplicate_selected)
+        file_menu.addAction(duplicate_action)
         
         file_menu.addSeparator()
         
@@ -751,7 +789,12 @@ class MainWindow(QMainWindow):
         self.folder_cache.clear()
         self.encrypted_volume = None
         self.is_encrypted = False
-        self.dmg_image = None  # DMG 镜像对象
+        self.dmg_image = None
+        self.unified_volume = None
+        
+        # 检测文件系统类型
+        fs_type = detect_filesystem(path)
+        self.statusBar().showMessage(f"检测到文件系统类型: {fs_type.value}")
         
         # 检查是否是 DMG 文件
         if path.lower().endswith('.dmg') and DMGImage is not None:
@@ -761,7 +804,6 @@ class MainWindow(QMainWindow):
                     # 找到 HFS+ 分区
                     hfs_partition = None
                     for partition in dmg.partitions:
-                        # 简单检查：假设第一个分区是 HFS+
                         hfs_partition = partition
                         break
                     
@@ -787,6 +829,7 @@ class MainWindow(QMainWindow):
                         
                         # 使用临时文件加载
                         path = temp_path
+                        fs_type = detect_filesystem(path)
                     else:
                         QMessageBox.warning(self, "警告", "DMG 文件中没有找到分区")
                         self.setEnabled(True)
@@ -802,77 +845,46 @@ class MainWindow(QMainWindow):
                 self.setEnabled(True)
                 return
             except Exception as e:
-                # DMG 解析失败，尝试直接作为 HFS+ 加载
-                if 'dmg' in locals():
-                    try:
-                        dmg.close()
-                    except:
-                        pass
                 pass
         
-        # 检查是否是加密卷
-        try:
-            with open(path, 'rb') as f:
-                # 读取前 512 字节检查是否是 CoreStorage
-                header_data = f.read(512)
-                if len(header_data) >= 512 and header_data[88:90] == b'CS':
-                    # 是 CoreStorage 卷
-                    self.is_encrypted = True
+        # 处理 CoreStorage 加密卷
+        if fs_type == FileSystemType.CORESTORAGE:
+            try:
+                from src.core.corestorage_full import CoreStorageReader, CoreStorageDecryptor
+                cs_reader = CoreStorageReader(path)
+                cs_reader.open()
+                
+                if cs_reader.is_encrypted():
+                    # 显示密码对话框
+                    password = PasswordDialog.get_password(
+                        self, os.path.basename(path)
+                    )
                     
-                    # 尝试解析加密卷头
-                    try:
-                        cs_header = EncryptedVolumeHeader(header_data)
-                        if cs_header.is_encrypted:
-                            # 显示密码对话框
-                            password = PasswordDialog.get_password(
-                                self, os.path.basename(path)
-                            )
-                            
-                            if password is None:
-                                # 用户取消
-                                self.setEnabled(True)
-                                return
-                            
-                            # 尝试解析加密卷
-                            try:
-                                with open(path, 'rb') as ef:
-                                    parser = EncryptedVolumeParser(ef)
-                                    enc_volume = parser.parse()
-                                    
-                                    # 尝试用密码解锁
-                                    if enc_volume.unlock(password):
-                                        QMessageBox.information(
-                                            self, "加密卷",
-                                            "密码验证成功！\n"
-                                            "注意：加密卷的透明解密功能仍在开发中。\n"
-                                            "当前仅支持密码验证，无法读取加密内容。"
-                                        )
-                                    else:
-                                        QMessageBox.warning(
-                                            self, "加密卷",
-                                            "密码错误或密钥包数据不完整。"
-                                        )
-                                        self.setEnabled(True)
-                                        return
-                            except CryptoError as e:
-                                QMessageBox.warning(
-                                    self, "加密卷",
-                                    f"解密失败: {e}\n\n"
-                                    "注意：密钥包解析功能仍在开发中。"
-                                )
-                                self.setEnabled(True)
-                                return
-                            except Exception as e:
-                                QMessageBox.warning(
-                                    self, "加密卷",
-                                    f"加密卷处理失败: {e}"
-                                )
-                                self.setEnabled(True)
-                                return
-                    except CryptoError as e:
-                        QMessageBox.warning(self, "警告", f"解析加密卷头失败: {e}")
-        except Exception:
-            pass
+                    if password is None:
+                        cs_reader.close()
+                        self.setEnabled(True)
+                        return
+                    
+                    # 尝试解锁
+                    decryptor = CoreStorageDecryptor(cs_reader)
+                    if decryptor.unlock_with_password(password):
+                        QMessageBox.information(
+                            self, "加密卷",
+                            "密码验证成功！\n"
+                            "注意：CoreStorage 解密功能仍在开发中。"
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self, "加密卷",
+                            "密码错误或密钥包数据不完整。"
+                        )
+                        cs_reader.close()
+                        self.setEnabled(True)
+                        return
+                
+                cs_reader.close()
+            except Exception as e:
+                QMessageBox.warning(self, "警告", f"CoreStorage 处理失败: {e}")
         
         # 检查是否有分区表
         try:
@@ -881,11 +893,15 @@ class MainWindow(QMainWindow):
                 
                 # 如果有多个分区，让用户选择
                 if len(partitions) > 1:
-                    hfs_partitions = [p for p in partitions if p.is_hfs]
+                    # 查找所有支持的分区
+                    supported_partitions = []
+                    for p in partitions:
+                        if p.is_hfs:
+                            supported_partitions.append(p)
                     
-                    if len(hfs_partitions) > 1:
+                    if len(supported_partitions) > 1:
                         # 显示分区选择对话框
-                        items = [f"{p.name} ({p.type_name}, {p.size_bytes / (1024**3):.2f} GB)" for p in hfs_partitions]
+                        items = [f"{p.name} ({p.type_name}, {p.size_bytes / (1024**3):.2f} GB)" for p in supported_partitions]
                         item, ok = QInputDialog.getItem(
                             self, "选择分区",
                             f"检测到 {partition_type.name} 分区表，请选择要打开的分区:",
@@ -894,13 +910,11 @@ class MainWindow(QMainWindow):
                         
                         if ok and item:
                             idx = items.index(item)
-                            selected_partition = hfs_partitions[idx]
-                            # 使用分区偏移量加载
+                            selected_partition = supported_partitions[idx]
                             self._load_filesystem_with_offset(path, selected_partition.start_offset)
                             return
-                    elif len(hfs_partitions) == 1:
-                        # 只有一个 HFS+ 分区，直接使用
-                        self._load_filesystem_with_offset(path, hfs_partitions[0].start_offset)
+                    elif len(supported_partitions) == 1:
+                        self._load_filesystem_with_offset(path, supported_partitions[0].start_offset)
                         return
         except Exception:
             pass
@@ -1316,12 +1330,54 @@ class MainWindow(QMainWindow):
         if has_selection:
             menu.addSeparator()
             
+            # 复制/剪切/粘贴子菜单
+            edit_menu = menu.addMenu("编辑")
+            
+            copy_action = edit_menu.addAction("复制")
+            copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+            copy_action.triggered.connect(self._copy_selected)
+            
+            cut_action = edit_menu.addAction("剪切")
+            cut_action.setShortcut(QKeySequence.StandardKey.Cut)
+            cut_action.triggered.connect(self._cut_selected)
+            
+            paste_action = edit_menu.addAction("粘贴")
+            paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+            paste_action.triggered.connect(self._paste_items)
+            
+            duplicate_action = edit_menu.addAction("复制到此处")
+            duplicate_action.setShortcut("Ctrl+Shift+D")
+            duplicate_action.triggered.connect(self._duplicate_selected)
+            
+            menu.addSeparator()
+            
+            # 移动到子菜单
+            move_menu = menu.addMenu("移动到")
+            
+            # 添加常用位置
+            desktop_action = move_menu.addAction("桌面")
+            desktop_action.triggered.connect(lambda: self._move_to_special_folder("Desktop"))
+            
+            documents_action = move_menu.addAction("文稿")
+            documents_action.triggered.connect(lambda: self._move_to_special_folder("Documents"))
+            
+            downloads_action = move_menu.addAction("下载")
+            downloads_action.triggered.connect(lambda: self._move_to_special_folder("Downloads"))
+            
+            move_menu.addSeparator()
+            
+            choose_folder_action = move_menu.addAction("选择文件夹...")
+            choose_folder_action.triggered.connect(self._move_to_chosen_folder)
+            
+            menu.addSeparator()
+            
             # 重命名
             rename_action = menu.addAction("重命名")
             rename_action.triggered.connect(self._rename_selected)
             
             # 删除
             delete_action = menu.addAction("删除")
+            delete_action.setShortcut(QKeySequence.StandardKey.Delete)
             delete_action.triggered.connect(self._delete_selected)
             
             menu.addSeparator()
@@ -1329,6 +1385,20 @@ class MainWindow(QMainWindow):
             # 属性
             info_action = menu.addAction("属性")
             info_action.triggered.connect(self._show_selected_info)
+        
+        # 检查剪贴板是否有内容
+        if self.clipboard_manager.has_content():
+            menu.addSeparator()
+            
+            # 粘贴按钮
+            paste_action = menu.addAction("粘贴")
+            paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+            paste_action.triggered.connect(self._paste_items)
+            
+            # 显示剪贴板状态
+            summary = self.clipboard_manager.get_summary()
+            status_action = menu.addAction(summary)
+            status_action.setEnabled(False)
         
         menu.exec(QCursor.pos())
     
@@ -2205,6 +2275,385 @@ class MainWindow(QMainWindow):
                 )
         except Exception as e:
             QMessageBox.warning(self, "错误", f"无法预览文件: {e}")
+    
+    def _copy_selected(self):
+        """复制选中的项目到剪贴板"""
+        selected = self.table_widget.selectedItems()
+        if not selected:
+            return
+        
+        # 获取选中的项目数据
+        items = []
+        rows = set()
+        for item in selected:
+            rows.add(item.row())
+        
+        for row in rows:
+            name_item = self.table_widget.item(row, 0)
+            if name_item:
+                item_data = name_item.data(Qt.ItemDataRole.UserRole)
+                if item_data:
+                    clipboard_item = ClipboardItem(
+                        parent_id=self.current_folder_id,
+                        name=item_data['name'],
+                        item_type=item_data['type'],
+                        item_id=item_data.get('id', 0),
+                        size=item_data.get('size', 0)
+                    )
+                    items.append(clipboard_item)
+        
+        if items:
+            self.clipboard_manager.copy(items, self.current_path)
+            self.statusBar().showMessage(self.clipboard_manager.get_summary())
+    
+    def _cut_selected(self):
+        """剪切选中的项目到剪贴板"""
+        selected = self.table_widget.selectedItems()
+        if not selected:
+            return
+        
+        # 获取选中的项目数据
+        items = []
+        rows = set()
+        for item in selected:
+            rows.add(item.row())
+        
+        for row in rows:
+            name_item = self.table_widget.item(row, 0)
+            if name_item:
+                item_data = name_item.data(Qt.ItemDataRole.UserRole)
+                if item_data:
+                    clipboard_item = ClipboardItem(
+                        parent_id=self.current_folder_id,
+                        name=item_data['name'],
+                        item_type=item_data['type'],
+                        item_id=item_data.get('id', 0),
+                        size=item_data.get('size', 0)
+                    )
+                    items.append(clipboard_item)
+        
+        if items:
+            self.clipboard_manager.cut(items, self.current_path)
+            self.statusBar().showMessage(self.clipboard_manager.get_summary())
+    
+    def _paste_items(self):
+        """粘贴剪贴板中的项目"""
+        if not self.clipboard_manager.has_content():
+            QMessageBox.information(self, "粘贴", "剪贴板为空")
+            return
+        
+        if not self._init_write_support():
+            return
+        
+        # 获取剪贴板中的项目
+        items = self.clipboard_manager.paste()
+        operation = self.clipboard_manager.get_operation()
+        
+        # 确认粘贴
+        reply = QMessageBox.question(
+            self,
+            "确认粘贴",
+            f"确定要{operation.value} {len(items)} 个项目到当前文件夹吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # 执行粘贴操作
+        success_count = 0
+        errors = []
+        
+        try:
+            from src.core.hfs.writer import CopyManager
+            copy_manager = CopyManager(self.catalog_writer, self.volume)
+            
+            for item in items:
+                try:
+                    if operation == ClipboardOperation.COPY:
+                        # 复制操作
+                        new_id = copy_manager.copy_entry(
+                            item.parent_id, item.name,
+                            self.current_folder_id, item.name
+                        )
+                        success_count += 1
+                    elif operation == ClipboardOperation.CUT:
+                        # 剪切操作（移动）
+                        self.catalog_writer.move_entry(
+                            item.parent_id, item.name,
+                            self.current_folder_id, item.name
+                        )
+                        success_count += 1
+                except Exception as e:
+                    errors.append(f"{item.name}: {str(e)}")
+            
+            # 清空剪贴板（如果是剪切操作）
+            if operation == ClipboardOperation.CUT:
+                self.clipboard_manager.clear()
+            
+            # 刷新视图
+            self._refresh_current_folder()
+            
+            # 显示结果
+            if errors:
+                error_text = "\n".join(errors[:5])
+                if len(errors) > 5:
+                    error_text += f"\n... 还有 {len(errors) - 5} 个错误"
+                QMessageBox.warning(
+                    self, "粘贴完成",
+                    f"成功 {operation.value} {success_count}/{len(items)} 个项目\n\n错误:\n{error_text}"
+                )
+            else:
+                self.statusBar().showMessage(f"已{operation.value} {success_count} 个项目")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"粘贴失败: {e}")
+    
+    def _duplicate_selected(self):
+        """复制选中的项目到当前位置"""
+        if not self._init_write_support():
+            return
+        
+        # 获取选中的项目
+        selected = self.table_widget.selectedItems()
+        if not selected:
+            QMessageBox.information(self, "复制", "请先选择要复制的项目")
+            return
+        
+        # 获取选中的项目数据
+        rows = set()
+        for item in selected:
+            rows.add(item.row())
+        
+        items = []
+        for row in rows:
+            name_item = self.table_widget.item(row, 0)
+            if name_item:
+                item_data = name_item.data(Qt.ItemDataRole.UserRole)
+                if item_data:
+                    items.append(item_data)
+        
+        if not items:
+            return
+        
+        # 确认复制
+        reply = QMessageBox.question(
+            self,
+            "确认复制",
+            f"确定要复制 {len(items)} 个项目到当前位置吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # 执行复制操作
+        success_count = 0
+        errors = []
+        
+        try:
+            from src.core.hfs.writer import CopyManager
+            copy_manager = CopyManager(self.catalog_writer, self.volume)
+            
+            for item_data in items:
+                try:
+                    new_id = copy_manager.duplicate_entry(
+                        self.current_folder_id, item_data['name']
+                    )
+                    success_count += 1
+                except Exception as e:
+                    errors.append(f"{item_data['name']}: {str(e)}")
+            
+            # 刷新视图
+            self._refresh_current_folder()
+            
+            # 显示结果
+            if errors:
+                error_text = "\n".join(errors[:5])
+                if len(errors) > 5:
+                    error_text += f"\n... 还有 {len(errors) - 5} 个错误"
+                QMessageBox.warning(
+                    self, "复制完成",
+                    f"成功复制 {success_count}/{len(items)} 个项目\n\n错误:\n{error_text}"
+                )
+            else:
+                self.statusBar().showMessage(f"已复制 {success_count} 个项目")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"复制失败: {e}")
+    
+    def _move_to_special_folder(self, folder_name: str):
+        """移动到特殊文件夹"""
+        if not self._init_write_support():
+            return
+        
+        # 获取选中的项目
+        selected = self.table_widget.selectedItems()
+        if not selected:
+            QMessageBox.information(self, "移动", "请先选择要移动的项目")
+            return
+        
+        # 获取选中的项目数据
+        rows = set()
+        for item in selected:
+            rows.add(item.row())
+        
+        items = []
+        for row in rows:
+            name_item = self.table_widget.item(row, 0)
+            if name_item:
+                item_data = name_item.data(Qt.ItemDataRole.UserRole)
+                if item_data:
+                    items.append(item_data)
+        
+        if not items:
+            return
+        
+        # 查找目标文件夹
+        target_folder_id = self._find_folder_by_name(folder_name)
+        if target_folder_id is None:
+            QMessageBox.warning(self, "错误", f"未找到文件夹: {folder_name}")
+            return
+        
+        # 确认移动
+        reply = QMessageBox.question(
+            self,
+            "确认移动",
+            f"确定要移动 {len(items)} 个项目到 '{folder_name}' 吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # 执行移动操作
+        success_count = 0
+        errors = []
+        
+        for item_data in items:
+            try:
+                self.catalog_writer.move_entry(
+                    self.current_folder_id, item_data['name'],
+                    target_folder_id, item_data['name']
+                )
+                success_count += 1
+            except Exception as e:
+                errors.append(f"{item_data['name']}: {str(e)}")
+        
+        # 刷新视图
+        self._refresh_current_folder()
+        
+        # 显示结果
+        if errors:
+            error_text = "\n".join(errors[:5])
+            if len(errors) > 5:
+                error_text += f"\n... 还有 {len(errors) - 5} 个错误"
+            QMessageBox.warning(
+                self, "移动完成",
+                f"成功移动 {success_count}/{len(items)} 个项目\n\n错误:\n{error_text}"
+            )
+        else:
+            self.statusBar().showMessage(f"已移动 {success_count} 个项目到 '{folder_name}'")
+    
+    def _move_to_chosen_folder(self):
+        """移动到选择的文件夹"""
+        if not self._init_write_support():
+            return
+        
+        # 获取选中的项目
+        selected = self.table_widget.selectedItems()
+        if not selected:
+            QMessageBox.information(self, "移动", "请先选择要移动的项目")
+            return
+        
+        # 获取选中的项目数据
+        rows = set()
+        for item in selected:
+            rows.add(item.row())
+        
+        items = []
+        for row in rows:
+            name_item = self.table_widget.item(row, 0)
+            if name_item:
+                item_data = name_item.data(Qt.ItemDataRole.UserRole)
+                if item_data:
+                    items.append(item_data)
+        
+        if not items:
+            return
+        
+        # 选择目标文件夹
+        target_dir = QFileDialog.getExistingDirectory(self, "选择目标文件夹")
+        if not target_dir:
+            return
+        
+        # 查找目标文件夹 CNID
+        target_folder_id = self._find_folder_by_path(target_dir)
+        if target_folder_id is None:
+            QMessageBox.warning(self, "错误", f"未找到目标文件夹: {target_dir}")
+            return
+        
+        # 确认移动
+        reply = QMessageBox.question(
+            self,
+            "确认移动",
+            f"确定要移动 {len(items)} 个项目到 '{target_dir}' 吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # 执行移动操作
+        success_count = 0
+        errors = []
+        
+        for item_data in items:
+            try:
+                self.catalog_writer.move_entry(
+                    self.current_folder_id, item_data['name'],
+                    target_folder_id, item_data['name']
+                )
+                success_count += 1
+            except Exception as e:
+                errors.append(f"{item_data['name']}: {str(e)}")
+        
+        # 刷新视图
+        self._refresh_current_folder()
+        
+        # 显示结果
+        if errors:
+            error_text = "\n".join(errors[:5])
+            if len(errors) > 5:
+                error_text += f"\n... 还有 {len(errors) - 5} 个错误"
+            QMessageBox.warning(
+                self, "移动完成",
+                f"成功移动 {success_count}/{len(items)} 个项目\n\n错误:\n{error_text}"
+            )
+        else:
+            self.statusBar().showMessage(f"已移动 {success_count} 个项目")
+    
+    def _find_folder_by_name(self, folder_name: str) -> Optional[int]:
+        """根据名称查找文件夹 CNID"""
+        # 在当前文件夹中查找
+        if self.current_folder_id in self.folder_cache:
+            contents = self.folder_cache[self.current_folder_id]
+            for item in contents:
+                if item['type'] == 'folder' and item['name'] == folder_name:
+                    return item['id']
+        
+        # 在根目录中查找
+        if 2 in self.folder_cache:
+            contents = self.folder_cache[2]
+            for item in contents:
+                if item['type'] == 'folder' and item['name'] == folder_name:
+                    return item['id']
+        
+        return None
+    
+    def _find_folder_by_path(self, path: str) -> Optional[int]:
+        """根据路径查找文件夹 CNID"""
+        # 简化实现：返回根目录
+        # 实际实现需要遍历路径
+        return 2
     
     def closeEvent(self, event):
         """关闭窗口事件"""

@@ -26,6 +26,13 @@ TRANSLATIONS = {
         'menu.file.recent': '最近打开(&R)',
         'menu.file.exit': '退出(&X)',
         
+        'menu.edit': '编辑(&E)',
+        'menu.edit.copy': '复制(&C)',
+        'menu.edit.cut': '剪切(&T)',
+        'menu.edit.paste': '粘贴(&P)',
+        'menu.edit.duplicate': '复制到此处(&D)',
+        'menu.edit.select_all': '全选(&A)',
+        
         'menu.tools': '工具(&T)',
         'menu.tools.search': '搜索(&S)...',
         'menu.tools.view_mode': '视图模式(&V)',
@@ -65,6 +72,10 @@ TRANSLATIONS = {
         'status.deleted': '已删除: {}',
         'status.renamed': '已重命名为: {}',
         'status.extracted': '已提取: {} 个文件',
+        'status.copied': '已复制 {} 个项目',
+        'status.cut': '已剪切 {} 个项目',
+        'status.pasted': '已粘贴 {} 个项目',
+        'status.moved': '已移动 {} 个项目到 {}',
         
         # 对话框
         'dialog.open.title': '打开 HFS 磁盘镜像',
@@ -178,12 +189,21 @@ HFS+/HFSX 文件系统浏览器，支持读写操作。
         'error.no_files_in_selection': '选中的项目中没有文件',
         'error.no_volume': '未打开任何卷',
         'error.no_write_support': '无法初始化写入支持',
+        'error.clipboard_empty': '剪贴板为空',
+        'error.no_folder_selection': '请先选择要移动的项目',
+        'error.folder_not_found': '未找到目标文件夹: {}',
         
         # 确认对话框
         'confirm.delete_title': '确认删除',
         'confirm.delete_msg': '确定要删除{} \'{}\' 吗？',
         'confirm.rename_title': '重命名',
         'confirm.rename_msg': '请输入新名称:',
+        'confirm.paste_title': '确认粘贴',
+        'confirm.paste_msg': '确定要{} {} 个项目到当前文件夹吗？',
+        'confirm.duplicate_title': '确认复制',
+        'confirm.duplicate_msg': '确定要复制 {} 个项目到当前位置吗？',
+        'confirm.move_title': '确认移动',
+        'confirm.move_msg': '确定要移动 {} 个项目到 '{}' 吗？',
         
         # 提取对话框
         'extract.progress_title': '提取文件',
@@ -241,6 +261,13 @@ HFS+/HFSX 文件系统浏览器，支持读写操作。
         'menu.file.recent': '&Recent',
         'menu.file.exit': 'E&xit',
         
+        'menu.edit': '&Edit',
+        'menu.edit.copy': '&Copy',
+        'menu.edit.cut': 'Cu&t',
+        'menu.edit.paste': '&Paste',
+        'menu.edit.duplicate': '&Duplicate',
+        'menu.edit.select_all': 'Select &All',
+        
         'menu.tools': '&Tools',
         'menu.tools.search': '&Search...',
         'menu.tools.view_mode': '&View Mode',
@@ -280,6 +307,10 @@ HFS+/HFSX 文件系统浏览器，支持读写操作。
         'status.deleted': 'Deleted: {}',
         'status.renamed': 'Renamed to: {}',
         'status.extracted': 'Extracted: {} files',
+        'status.copied': 'Copied {} items',
+        'status.cut': 'Cut {} items',
+        'status.pasted': 'Pasted {} items',
+        'status.moved': 'Moved {} items to {}',
         
         # Dialogs
         'dialog.open.title': 'Open HFS Disk Image',
@@ -393,12 +424,21 @@ Original author: Erik Larsson (Catacombae Software)''',
         'error.no_files_in_selection': 'No files in selection',
         'error.no_volume': 'No volume opened',
         'error.no_write_support': 'Cannot initialize write support',
+        'error.clipboard_empty': 'Clipboard is empty',
+        'error.no_folder_selection': 'Please select items to move',
+        'error.folder_not_found': 'Target folder not found: {}',
         
         # Confirm dialogs
         'confirm.delete_title': 'Confirm Delete',
         'confirm.delete_msg': 'Are you sure you want to delete {} \'{}\'?',
         'confirm.rename_title': 'Rename',
         'confirm.rename_msg': 'Enter new name:',
+        'confirm.paste_title': 'Confirm Paste',
+        'confirm.paste_msg': 'Are you sure you want to {} {} items to the current folder?',
+        'confirm.duplicate_title': 'Confirm Duplicate',
+        'confirm.duplicate_msg': 'Are you sure you want to duplicate {} items here?',
+        'confirm.move_title': 'Confirm Move',
+        'confirm.move_msg': 'Are you sure you want to move {} items to '{}'?',
         
         # Extract dialog
         'extract.progress_title': 'Extracting Files',
