@@ -20,6 +20,7 @@ from .btree import (
     HFSPlusCatalogKey,
     HFSPlusCatalogFolder,
     HFSPlusCatalogFile,
+    HFSPlusCatalogThread,
     HFSPlusExtentKey,
     HFSPlusExtentRecord,
     HFSPlusExtentDescriptor,
@@ -344,8 +345,30 @@ class CatalogWriter:
         key_bytes = key.to_bytes()
         record_bytes = file_record.to_bytes()
         
-        # 插入到 B-tree
+        # 插入文件记录到 B-tree
         self.btree_writer.insert_record(key_bytes, record_bytes)
+        
+        # 创建线程记录
+        # 线程记录的键: (parentID=自己的CNID, name="")
+        thread_key = HFSPlusCatalogKey(
+            key_length=6,
+            parent_id=file_id,
+            node_name=""
+        )
+        
+        # 线程记录的数据: (record_type=4, reserved=0, parentID=父文件夹的CNID, node_name=自己的名称)
+        thread_record = HFSPlusCatalogThread(
+            record_type=CatalogRecordType.FILE_THREAD,
+            reserved=0,
+            parent_id=parent_id,
+            node_name=name
+        )
+        
+        thread_key_bytes = thread_key.to_bytes()
+        thread_record_bytes = thread_record.to_bytes()
+        
+        # 插入线程记录到 B-tree
+        self.btree_writer.insert_record(thread_key_bytes, thread_record_bytes)
         
         # 更新卷头的文件计数
         self.volume_header.file_count += 1
@@ -363,17 +386,23 @@ class CatalogWriter:
         Returns:
             分配的块号列表
         """
-        # 简化实现：从下一个分配位置开始分配
+        # 从下一个分配位置开始分配
         start = self.volume_header.next_allocation
         block_size = self.volume_header.block_size
         total_blocks = self.volume_header.total_blocks
+        free_blocks = self.volume_header.free_blocks
+        
+        # 检查是否有足够的空闲块
+        if count > free_blocks:
+            return []  # 没有足够的空闲块
         
         # 查找空闲块
         allocated = []
         current = start
         
         while len(allocated) < count and current < total_blocks:
-            # 检查块是否空闲（简化：假设空闲）
+            # 简化实现：假设从 next_allocation 开始的块都是空闲的
+            # 实际实现应该检查分配位图
             allocated.append(current)
             current += 1
         
@@ -456,8 +485,30 @@ class CatalogWriter:
         key_bytes = key.to_bytes()
         record_bytes = folder_record.to_bytes()
         
-        # 插入到 B-tree
+        # 插入文件夹记录到 B-tree
         self.btree_writer.insert_record(key_bytes, record_bytes)
+        
+        # 创建线程记录
+        # 线程记录的键: (parentID=自己的CNID, name="")
+        thread_key = HFSPlusCatalogKey(
+            key_length=6,
+            parent_id=folder_id,
+            node_name=""
+        )
+        
+        # 线程记录的数据: (record_type=3, reserved=0, parentID=父文件夹的CNID, node_name=自己的名称)
+        thread_record = HFSPlusCatalogThread(
+            record_type=CatalogRecordType.FOLDER_THREAD,
+            reserved=0,
+            parent_id=parent_id,
+            node_name=name
+        )
+        
+        thread_key_bytes = thread_key.to_bytes()
+        thread_record_bytes = thread_record.to_bytes()
+        
+        # 插入线程记录到 B-tree
+        self.btree_writer.insert_record(thread_key_bytes, thread_record_bytes)
         
         # 更新卷头的文件夹计数
         self.volume_header.folder_count += 1
@@ -634,16 +685,19 @@ class FileWriter:
         writer.write_data(file_id, data)
     """
     
-    def __init__(self, stream: BinaryIO, volume_header: HFSPlusVolumeHeader):
+    def __init__(self, stream: BinaryIO, volume_header: HFSPlusVolumeHeader,
+                 catalog: CatalogBTree = None):
         """
         初始化文件写入器
         
         Args:
             stream: 可写的二进制流
             volume_header: 卷头
+            catalog: Catalog B-tree（用于查找文件记录）
         """
         self.stream = stream
         self.volume_header = volume_header
+        self.catalog = catalog
     
     def write_data(self, file_id: int, data: bytes) -> bool:
         """
@@ -660,25 +714,64 @@ class FileWriter:
         block_size = self.volume_header.block_size
         blocks_needed = (len(data) + block_size - 1) // block_size
         
+        # 查找文件记录以获取实际的磁盘位置
+        if self.catalog is None:
+            raise WriteError("Catalog 未初始化，无法写入文件数据")
+        
+        # 查找文件记录
+        file_record = None
+        for node in self.catalog.list_leaf_nodes():
+            for i in range(node.num_records):
+                record_data = node.get_record_data(i)
+                key = HFSPlusCatalogKey.from_bytes(record_data)
+                record_type = struct.unpack_from('>H', record_data, key.occupied_size)[0]
+                if record_type == CatalogRecordType.FILE:
+                    file = HFSPlusCatalogFile.from_bytes(record_data, key.occupied_size)
+                    if file.file_id == file_id:
+                        file_record = file
+                        break
+            if file_record:
+                break
+        
+        if file_record is None:
+            raise WriteError(f"文件未找到: {file_id}")
+        
+        # 获取数据分支的 extents
+        extents = file_record.get_data_fork_extents()
+        if not extents or extents[0][1] == 0:
+            # 没有分配的块，需要先分配
+            raise WriteError("文件没有分配的数据块")
+        
         # 写入数据块
-        for i in range(blocks_needed):
-            block_offset = i * block_size
-            block_data = data[block_offset:block_offset + block_size]
+        bytes_written = 0
+        for extent_idx, (start_block, block_count) in enumerate(extents):
+            if bytes_written >= len(data):
+                break
             
-            # 如果是最后一个块且不满，填充 0
-            if len(block_data) < block_size:
-                block_data = block_data + b'\x00' * (block_size - len(block_data))
-            
-            # 计算实际的磁盘偏移（简化：假设块是连续的）
-            disk_offset = (file_id + i) * block_size
-            
-            # 写入数据
-            self.stream.seek(disk_offset)
-            self.stream.write(block_data)
+            for block_idx in range(block_count):
+                if bytes_written >= len(data):
+                    break
+                
+                block_offset = (start_block + block_idx) * block_size
+                start = bytes_written
+                end = min(start + block_size, len(data))
+                block_data = data[start:end]
+                
+                # 填充到块大小
+                if len(block_data) < block_size:
+                    block_data = block_data + b'\x00' * (block_size - len(block_data))
+                
+                # 写入数据
+                self.stream.seek(block_offset)
+                self.stream.write(block_data)
+                bytes_written += len(block_data)
+        
+        # 更新文件的逻辑大小
+        # 注意：这里简化处理，实际需要更新 Catalog 记录
         
         # 更新卷头
         self.volume_header.write_count += 1
-        self.stream.seek(1024)
+        self.stream.seek(VOLUME_HEADER_OFFSET)
         self.stream.write(self.volume_header.to_bytes())
         
         return True
@@ -700,7 +793,7 @@ class FileWriter:
         
         # 更新卷头
         self.volume_header.write_count += 1
-        self.stream.seek(1024)
+        self.stream.seek(VOLUME_HEADER_OFFSET)
         self.stream.write(self.volume_header.to_bytes())
         
         return True
@@ -731,14 +824,14 @@ class VolumeWriter:
     def update_header(self):
         """更新卷头"""
         # 写入卷头到偏移 1024
-        self.stream.seek(1024)
+        self.stream.seek(VOLUME_HEADER_OFFSET)
         self.stream.write(self.volume_header.to_bytes())
         
         # 写入备份卷头到卷末尾
-        backup_offset = (self.volume_header.total_blocks * 
-                        self.volume_header.block_size - 512)
-        self.stream.seek(backup_offset)
-        self.stream.write(self.volume_header.to_bytes())
+        if self.volume_header.volume_size > 0:
+            backup_offset = self.volume_header.volume_size - VOLUME_HEADER_SIZE
+            self.stream.seek(backup_offset)
+            self.stream.write(self.volume_header.to_bytes())
     
     def update_free_blocks(self, count: int):
         """

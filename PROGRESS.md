@@ -3,7 +3,7 @@
 ## 项目状态
 - **开始时间**：2026年7月7日
 - **当前阶段**：Alpha 读写浏览器
-- **总体进度**：~45%
+- **总体进度**：~50%
 
 ---
 
@@ -15,12 +15,14 @@
 |------|------|------|
 | **核心解析** | HFS+ / HFSX 卷头解析 | 完整支持 |
 | **核心解析** | B-tree 遍历 | Catalog、Extents Overflow |
-| **核心解析** | Unicode 比较 | NFD + casefold，符合 TN1150 规范 |
+| **核心解析** | Unicode 比较 | FastUnicodeCompare 算法（参考 Java 版本） |
 | **核心解析** | Catalog Thread 记录 | 通过 CNID 查找路径 |
 | **核心解析** | 叶节点循环检测 | 防止损坏镜像无限循环 |
+| **核心解析** | Fork Filter | 文件分支流式读取（参考 Java 版本） |
 | **分区表** | APM 解析 | Apple Partition Map |
 | **分区表** | GPT 解析 | GUID Partition Table |
 | **分区表** | MBR 解析 | Master Boot Record |
+| **分区表** | EBR 解析 | Extended Boot Record |
 | **分区表** | 自动检测 | 自动识别分区表类型 |
 | **GUI** | 目录浏览 | 树形目录、文件列表 |
 | **GUI** | 文件提取 | 单文件、批量提取，支持进度显示 |
@@ -31,8 +33,9 @@
 | **GUI** | 新建文件/文件夹 | 右键菜单、文件菜单、快捷键支持 |
 | **GUI** | 删除项目 | 右键菜单删除，带确认对话框 |
 | **GUI** | 重命名项目 | 右键菜单重命名，支持输入新名称 |
+| **GUI** | 文件预览 | 空格键快速预览文本文件 |
 | **写入** | B-tree 变异引擎 | 节点插入、删除、分裂、合并 |
-| **写入** | Catalog 写入器 | 创建文件/文件夹 |
+| **写入** | Catalog 写入器 | 创建文件/文件夹（含线程记录） |
 | **写入** | 分配位图管理 | 空闲块查找和分配 |
 | **写入** | 数据结构序列化 | to_bytes 方法 |
 | **写入** | HFS+ 格式化 | 创建新的 HFS+ 文件系统 |
@@ -65,24 +68,33 @@
 5. GUI 目录浏览 - 已修复
 6. HFSPlusCatalogFile.from_bytes 格式字符串 - 已修复
 7. HFSPlusCatalogFolder.from_bytes 格式字符串 - 已修复
+8. formatter.py 叶节点偏移表计算错误 - 已修复
+9. hfs_unicode_compare 无限循环 - 已修复
+10. btree_mutator.py _delete_from_node 未实现 - 已修复
+11. btree_mutator.py 使用字节比较而非 HFS+ Unicode 比较 - 已修复
+12. writer.py 缺少线程记录创建 - 已修复
+13. test_write_integration.py 叶节点缺少偏移表 - 已修复
 
 ### 新增功能
 1. Catalog Thread 记录解析
 2. 路径构建（通过 CNID 查找完整路径）
 3. 叶节点循环检测（防止损坏镜像无限循环）
-4. 分区表解析（APM、GPT、MBR）
+4. 分区表解析（APM、GPT、MBR、EBR）
 5. HFS+ 分区自动检测
 6. B-tree 变异引擎（插入、删除、分裂、合并）
-7. Catalog 写入器（创建文件/文件夹）
+7. Catalog 写入器（创建文件/文件夹，含线程记录）
 8. 分配位图管理
 9. CatalogKey/CatalogFolder/CatalogFile 序列化方法
 10. GUI 增删改集成（新建、删除、重命名文件/文件夹）
+11. Fork Filter（参考 Java 版本，流式读取文件分支）
+12. FastUnicodeCompare 算法（参考 Java 版本，使用 Apple TN1150 的 lower case 表）
+13. 搜索引擎路径构建（使用线程记录递归构建完整路径）
 
 ---
 
 ## 测试状态
 
-- **测试总数**：148 个
+- **测试总数**：181 个
 - **通过率**：100%
 - **测试模块**：
   - `test_btree.py` - B-tree 基础结构测试
@@ -93,6 +105,9 @@
   - `test_write_integration.py` - 写入集成测试
   - `test_formatter.py` - 格式化功能测试
   - `test_search.py` - 搜索功能测试
+  - `test_dmg.py` - DMG 镜像测试
+  - `test_e2e_flow.py` - 端到端流程测试
+  - `test_new_modules.py` - 新模块测试
 
 ---
 
@@ -104,6 +119,9 @@
 | `src/core/hfs/btree_mutator.py` | B-tree 变异引擎（~1100 行） |
 | `src/core/hfs/writer.py` | 写入器（~500 行） |
 | `src/core/hfs/reader.py` | 读取器（~450 行） |
+| `src/core/hfs/fork_filter.py` | Fork 过滤器（~300 行） |
+| `src/core/hfs/fast_unicode_compare.py` | FastUnicodeCompare（~300 行） |
+| `src/core/hfs/search.py` | 搜索引擎（~250 行） |
 | `src/core/partition/__init__.py` | 分区表解析（~400 行） |
 | `src/gui/main_window.py` | GUI 主窗口（~1200 行） |
 
@@ -118,4 +136,4 @@
 
 ---
 
-*最后更新：2026-07-09*
+*最后更新：2026-07-10*

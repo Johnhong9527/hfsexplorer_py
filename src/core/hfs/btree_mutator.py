@@ -244,11 +244,27 @@ class BTreeMutator:
             # 子节点号在键之后
             child_node = struct.unpack_from('>I', data, 2 + key_length)[0]
             
+            # 使用 HFS+ Unicode 比较而不是字节比较
+            if self.btree.compare_fn:
+                cmp_result = self.btree.compare_fn(key, key_data)
+            else:
+                # 回退到字节比较
+                cmp_result = -1 if key < key_data else (1 if key > key_data else 0)
+            
             # 如果键 <= 搜索键
-            if key <= key_data:
-                if best_key is None or key > best_key:
+            if cmp_result <= 0:
+                if best_key is None:
                     best_key = key
                     best_child = child_node
+                else:
+                    # 比较当前最佳键和新键
+                    if self.btree.compare_fn:
+                        best_cmp = self.btree.compare_fn(key, best_key)
+                    else:
+                        best_cmp = -1 if key < best_key else (1 if key > best_key else 0)
+                    if best_cmp > 0:
+                        best_key = key
+                        best_child = child_node
         
         return best_child
     
@@ -270,8 +286,15 @@ class BTreeMutator:
             key_length = struct.unpack_from('>H', data, 0)[0]
             key = data[:2 + key_length]
             
+            # 使用 HFS+ Unicode 比较而不是字节比较
+            if self.btree.compare_fn:
+                cmp_result = self.btree.compare_fn(key, key_data)
+            else:
+                # 回退到字节比较
+                cmp_result = -1 if key < key_data else (1 if key > key_data else 0)
+            
             # 如果当前键大于插入键
-            if key > key_data:
+            if cmp_result > 0:
                 return i
         
         return node.num_records
@@ -367,14 +390,35 @@ class BTreeMutator:
         # 获取记录偏移量
         record_offset = node.get_record_offset(index)
         
-        # 移动后续记录
-        # 注意：这里简化了实现，实际需要更复杂的数据移动
+        # 计算删除区域的结束位置
+        delete_end = record_offset + record_size
         
-        # 更新偏移表
-        # 注意：这里简化了实现，实际需要更新所有后续偏移
+        # 计算需要移动的数据（从删除位置到空闲空间开始）
+        free_space_start = node.offsets[-1]
+        
+        # 向左移动后续数据
+        if delete_end < free_space_start:
+            node.raw_data[record_offset:record_offset + (free_space_start - delete_end)] = \
+                node.raw_data[delete_end:free_space_start]
+        
+        # 计算偏移调整量
+        offset_adjust = record_size
+        
+        # 更新偏移表：移除被删除记录的偏移
+        node.offsets.pop(index)
+        
+        # 更新后续偏移（减去被删除记录的大小）
+        for i in range(index, len(node.offsets)):
+            node.offsets[i] -= offset_adjust
         
         # 更新记录数
         node.descriptor.numRecords -= 1
+        
+        # 更新节点末尾的偏移表
+        num_offsets = len(node.offsets)
+        for i, offset_val in enumerate(node.offsets):
+            pos = node.node_size - (num_offsets - i) * 2
+            struct.pack_into('>H', node.raw_data, pos, offset_val)
     
     def _insert_with_split(self, node: BTreeNode, index: int,
                           key_data: bytes, record_data: bytes) -> BTreeMutationResult:
@@ -828,11 +872,11 @@ class BTreeMutator:
         # 如果右节点有右兄弟，更新其后向链接
         if right_node.descriptor.fLink != 0:
             right_right_sibling = self.btree.get_node(right_node.descriptor.fLink)
-            right_right_sibling.descriptor.bLink = left_node.descriptor.fLink
+            right_right_sibling.descriptor.bLink = left_node.node_number
             self._write_node(right_right_sibling)
         
-        # 释放右节点
-        self._free_node(right_node.descriptor.fLink)
+        # 释放右节点（使用节点号而不是 fLink）
+        self._free_node(right_node.node_number)
         
         # 写入左节点
         self._write_node(left_node)

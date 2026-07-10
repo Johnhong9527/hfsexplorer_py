@@ -29,7 +29,7 @@ from src.core.hfs.writer import (
     WriteError,
 )
 from src.core.hfs.structures import HFSPlusVolumeHeader
-from src.core.hfs.constants import BTreeNodeKind, HFS_EPOCH_OFFSET
+from src.core.hfs.constants import BTreeNodeKind, HFS_EPOCH_OFFSET, BTREE_NODE_DESCRIPTOR_SIZE
 
 
 class TestCatalogWriterIntegration:
@@ -125,6 +125,9 @@ class TestCatalogWriterIntegration:
             reserved=0
         )
         data[node_size:node_size + 14] = leaf_desc.to_bytes()
+        
+        # 写入偏移表（空节点只有1个偏移条目，指向空闲空间开始位置）
+        struct.pack_into('>H', data, node_size * 2 - 2, BTREE_NODE_DESCRIPTOR_SIZE)
         
         # 创建 BytesIO 对象
         stream = BytesIO(data)

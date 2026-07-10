@@ -179,6 +179,7 @@ class MainWindow(QMainWindow):
         self.catalog_writer: Optional[CatalogWriter] = None
         self.is_readonly: bool = True  # 是否只读模式
         self.volume: Optional[HFSPlusVolume] = None  # 保持 volume 引用
+        self.volume_offset: int = 0  # 卷偏移量
         
         # 目录导航历史 (用于向上导航)
         self.folder_history: List[int] = []  # 父目录 ID 栈
@@ -445,7 +446,8 @@ class MainWindow(QMainWindow):
         status_bar.showMessage("就绪")
         
         # 版本标签
-        version_label = QLabel("v1.1.0")
+        from src import __version__
+        version_label = QLabel(f"v{__version__}")
         version_label.setStyleSheet("color: #757575; padding: 0 8px;")
         status_bar.addPermanentWidget(version_label)
         
@@ -801,6 +803,11 @@ class MainWindow(QMainWindow):
                 return
             except Exception as e:
                 # DMG 解析失败，尝试直接作为 HFS+ 加载
+                if 'dmg' in locals():
+                    try:
+                        dmg.close()
+                    except:
+                        pass
                 pass
         
         # 检查是否是加密卷
@@ -1395,7 +1402,9 @@ class MainWindow(QMainWindow):
                         data = vol.read_file(file_id)
                         
                         # 写入文件
-                        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                        parent_dir = os.path.dirname(output_path)
+                        if parent_dir:  # 避免空字符串
+                            os.makedirs(parent_dir, exist_ok=True)
                         with open(output_path, 'wb') as f:
                             f.write(data)
                         
@@ -1458,7 +1467,7 @@ class MainWindow(QMainWindow):
             
             # 保持 volume 引用以使用 catalog 和 header
             if self.volume is None:
-                self.volume = HFSPlusVolume(self.current_path)
+                self.volume = HFSPlusVolume(self.current_path, volume_offset=self.volume_offset)
             
             self.current_catalog = self.volume.catalog
             self.current_header = self.volume.header

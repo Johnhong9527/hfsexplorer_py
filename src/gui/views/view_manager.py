@@ -325,7 +325,8 @@ class ColumnViewWidget(QWidget):
         Args:
             items: 子项目列表
         """
-        # 移除后续列（如果有）
+        # 移除后续列（保留当前列）
+        # 当前列是最后选中的列，后续列需要替换
         while len(self._columns) > 1:
             last_widget = self.splitter.widget(len(self._columns) - 1)
             if last_widget:

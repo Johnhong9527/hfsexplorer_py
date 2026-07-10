@@ -77,7 +77,7 @@ def hfs_unicode_compare(str1: str, str2: str) -> int:
     len1, len2 = len(s1), len(s2)
     
     while True:
-        # 获取 str1 的下一个有效字符
+        # 获取 str1 的下一个有效字符序列
         c1 = '\0'
         while i < len1:
             ch = _hfs_fold_char(s1[i])
@@ -86,13 +86,13 @@ def hfs_unicode_compare(str1: str, str2: str) -> int:
                 c1 = ch[0]  # 取第一个字符（casefold 可能产生多字符）
                 break
         
-        # 获取 str2 的下一个有效字符
+        # 获取 str2 的下一个有效字符序列
         c2 = '\0'
         while j < len2:
             ch = _hfs_fold_char(s2[j])
             j += 1
             if ch and ch not in IGNORE_CHARS and ch != '\0':
-                c2 = ch[0]
+                c2 = ch[0]  # 取第一个字符
                 break
         
         # 比较
@@ -1468,6 +1468,8 @@ class CatalogBTree(BTreeFile):
         查找 Catalog 线程记录
         
         通过 CNID 查找对应的线程记录，获取父 ID 和名称。
+        线程记录的键是 (parentID=自己的CNID, name="")，
+        记录数据包含父文件夹的 CNID 和名称。
         
         Args:
             cnid: Catalog Node ID
@@ -1484,7 +1486,7 @@ class CatalogBTree(BTreeFile):
                 key = HFSPlusCatalogKey.from_bytes(data)
                 
                 # 检查是否是目标 CNID 的线程记录
-                # 线程记录的 parentID 是它自己的 CNID
+                # 线程记录的键中 parentID 是它自己的 CNID
                 if key.parent_id == cnid:
                     # 获取记录类型
                     record_type = struct.unpack_from('>H', data, key.occupied_size)[0]

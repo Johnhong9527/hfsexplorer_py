@@ -5,6 +5,7 @@ HFS+ 搜索功能
 """
 
 import re
+import struct
 from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -15,6 +16,7 @@ from src.core.hfs import (
     HFSPlusCatalogKey,
     HFSPlusCatalogFolder,
     HFSPlusCatalogFile,
+    HFSPlusCatalogThread,
     HFS_EPOCH_OFFSET,
 )
 
@@ -111,6 +113,7 @@ class SearchEngine:
                 
                 if record_type == CatalogRecordType.FOLDER:
                     folder = HFSPlusCatalogFolder.from_bytes(data, key.occupied_size)
+                    # 使用文件夹自己的 CNID 作为键
                     self._parent_cache[folder.folder_id] = key.node_name
     
     def _build_path(self, parent_id: int, name: str) -> str:
@@ -133,11 +136,29 @@ class SearchEngine:
         # 向上遍历父目录
         while current_id > 2:  # 2 = 根目录
             if current_id in self._parent_cache:
-                path_parts.append(self._parent_cache[current_id])
-                # 查找父目录的父目录
-                # 注意：这里简化处理，实际需要查找父目录的 parent_id
-                # 为了简化，我们只构建部分路径
-                break
+                folder_name = self._parent_cache[current_id]
+                path_parts.append(folder_name)
+                
+                # 查找父目录的 parent_id
+                # 线程记录的键是 (parentID=自己的CNID, name="")
+                # 记录数据包含父文件夹的 CNID
+                parent_found = False
+                for node in self.catalog.list_leaf_nodes():
+                    for i in range(node.num_records):
+                        data = node.get_record_data(i)
+                        key = HFSPlusCatalogKey.from_bytes(data)
+                        record_type = struct.unpack_from('>H', data, key.occupied_size)[0]
+                        if record_type == CatalogRecordType.FOLDER_THREAD:
+                            thread = HFSPlusCatalogThread.from_bytes(data, key.occupied_size)
+                            # 线程记录的键 parent_id 是它自己的 CNID
+                            if key.parent_id == current_id:
+                                current_id = thread.parent_id
+                                parent_found = True
+                                break
+                    if parent_found:
+                        break
+                if not parent_found:
+                    break
             else:
                 path_parts.append(f"CNID:{current_id}")
                 break
@@ -269,9 +290,6 @@ class SearchEngine:
             return bool(pattern.search(name))
         
         return False
-
-
-import struct
 
 
 class SearchDialog:

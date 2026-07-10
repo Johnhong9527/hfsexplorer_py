@@ -125,6 +125,16 @@ from .writer import (
     WriteError,
 )
 
+from .fork_filter import (
+    ForkType,
+    ForkFilter,
+    ExtentDescriptor as ForkExtentDescriptor,
+)
+
+from .fast_unicode_compare import (
+    fast_unicode_compare,
+)
+
 __all__ = [
     # 常量
     'SIGNATURE_HFS_PLUS',

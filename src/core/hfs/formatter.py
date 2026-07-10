@@ -617,8 +617,9 @@ class HFSPlusFormatter:
         current_hfs_date = int(time.time()) + HFS_EPOCH_OFFSET
         
         # 创建根目录的 Catalog 键
+        # key_length = parentID(4) + nameLength(2) + name(0) = 6
         root_key = HFSPlusCatalogKey(
-            key_length=6,  # 2 (parentID) + 2 (nameLength) + 2 (name)
+            key_length=6,
             parent_id=root_parent_id,
             node_name=""  # 根目录名称为空
         )
@@ -649,6 +650,7 @@ class HFSPlusFormatter:
         )
         
         # 创建线程记录的键
+        # 线程记录的键是 (parentID=自己的CNID, name="")
         thread_key = HFSPlusCatalogKey(
             key_length=6,
             parent_id=root_id,
@@ -675,26 +677,26 @@ class HFSPlusFormatter:
         record_offset = BTREE_NODE_DESCRIPTOR_SIZE
         
         # 写入文件夹记录
+        # 记录格式: key + record_type + record_data
+        # 注意: folder_record.to_bytes() 已经包含 record_type 字段
         key_bytes = root_key.to_bytes()
-        record_type_bytes = struct.pack('>H', CatalogRecordType.FOLDER)
+        folder_record_bytes = folder_record.to_bytes()
         
         leaf_data[record_offset:record_offset + len(key_bytes)] = key_bytes
         record_offset += len(key_bytes)
-        leaf_data[record_offset:record_offset + 2] = record_type_bytes
-        record_offset += 2
-        leaf_data[record_offset:record_offset + len(folder_record.to_bytes())] = folder_record.to_bytes()
-        record_offset += len(folder_record.to_bytes())
+        leaf_data[record_offset:record_offset + len(folder_record_bytes)] = folder_record_bytes
+        record_offset += len(folder_record_bytes)
         
         # 写入线程记录
+        # 记录格式: key + record_type + record_data
+        # 注意: thread_record.to_bytes() 已经包含 record_type 字段
         thread_key_bytes = thread_key.to_bytes()
-        thread_record_type_bytes = struct.pack('>H', CatalogRecordType.FOLDER_THREAD)
+        thread_record_bytes = thread_record.to_bytes()
         
         leaf_data[record_offset:record_offset + len(thread_key_bytes)] = thread_key_bytes
         record_offset += len(thread_key_bytes)
-        leaf_data[record_offset:record_offset + 2] = thread_record_type_bytes
-        record_offset += 2
-        leaf_data[record_offset:record_offset + len(thread_record.to_bytes())] = thread_record.to_bytes()
-        record_offset += len(thread_record.to_bytes())
+        leaf_data[record_offset:record_offset + len(thread_record_bytes)] = thread_record_bytes
+        record_offset += len(thread_record_bytes)
         
         # 更新节点描述符
         descriptor.numRecords = 2
@@ -703,10 +705,14 @@ class HFSPlusFormatter:
         leaf_data[0:BTREE_NODE_DESCRIPTOR_SIZE] = descriptor.to_bytes()
         
         # 更新偏移表
+        # offset[0] = 记录0的开始位置
+        # offset[1] = 记录1的开始位置
+        # offset[2] = 空闲空间的开始位置（记录结束位置）
+        folder_record_end = BTREE_NODE_DESCRIPTOR_SIZE + len(key_bytes) + len(folder_record_bytes)
         offsets = [
-            BTREE_NODE_DESCRIPTOR_SIZE,
-            BTREE_NODE_DESCRIPTOR_SIZE + len(key_bytes) + 2 + len(folder_record.to_bytes()),
-            record_offset
+            BTREE_NODE_DESCRIPTOR_SIZE,  # 记录0开始
+            folder_record_end,           # 记录1开始
+            record_offset                # 空闲空间开始
         ]
         
         num_offsets = len(offsets)
