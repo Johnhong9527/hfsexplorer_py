@@ -76,4 +76,4 @@ Thumbs.db
 *.log
 *.tmp
 *.bak
-config.local.json
+config.local.jsondata/
