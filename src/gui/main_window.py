@@ -155,8 +155,12 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("HFSExplorer (Alpha) - HFS+/HFSX 读写浏览器")
-        self.setMinimumSize(1024, 768)
+        self.setWindowTitle("HFSExplorer - HFS+/HFSX 读写浏览器")
+        self.setMinimumSize(1200, 800)
+        
+        # 应用样式表
+        from src.gui.styles import get_stylesheet
+        self.setStyleSheet(get_stylesheet())
         
         # 启用拖放
         self.setAcceptDrops(True)
@@ -327,23 +331,37 @@ class MainWindow(QMainWindow):
         """设置工具栏"""
         toolbar = QToolBar("主工具栏")
         toolbar.setIconSize(QSize(24, 24))
+        toolbar.setMovable(False)
         self.addToolBar(toolbar)
         
         # 打开按钮
         open_action = QAction("打开", self)
+        open_action.setIcon(self._get_icon("folder-open"))
+        open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._open_file)
         toolbar.addAction(open_action)
+        
+        # 打开设备按钮
+        device_action = QAction("设备", self)
+        device_action.setIcon(self._get_icon("drive-harddisk"))
+        device_action.setShortcut("Ctrl+D")
+        device_action.triggered.connect(self._open_device)
+        toolbar.addAction(device_action)
         
         toolbar.addSeparator()
         
         # 向上按钮
         self.up_action = QAction("向上", self)
+        self.up_action.setIcon(self._get_icon("go-up"))
+        self.up_action.setShortcut("Backspace")
         self.up_action.triggered.connect(self._go_up)
         self.up_action.setEnabled(False)
         toolbar.addAction(self.up_action)
         
         # 刷新按钮
         refresh_action = QAction("刷新", self)
+        refresh_action.setIcon(self._get_icon("view-refresh"))
+        refresh_action.setShortcut("F5")
         refresh_action.triggered.connect(self._refresh)
         toolbar.addAction(refresh_action)
         
@@ -351,6 +369,8 @@ class MainWindow(QMainWindow):
         
         # 搜索按钮
         search_action = QAction("搜索", self)
+        search_action.setIcon(self._get_icon("edit-find"))
+        search_action.setShortcut("Ctrl+F")
         search_action.triggered.connect(self._show_search_dialog)
         toolbar.addAction(search_action)
         
@@ -358,16 +378,53 @@ class MainWindow(QMainWindow):
         
         # 提取按钮
         extract_action = QAction("提取", self)
+        extract_action.setIcon(self._get_icon("document-save"))
+        extract_action.setShortcut("Ctrl+E")
         extract_action.triggered.connect(self._extract_selected)
         toolbar.addAction(extract_action)
     
+    def _get_icon(self, name: str) -> QIcon:
+        """获取图标"""
+        # 使用标准图标
+        style = self.style()
+        icon_map = {
+            "folder-open": QStyle.StandardPixmap.SP_DirOpenIcon,
+            "drive-harddisk": QStyle.StandardPixmap.SP_DriveHDIcon,
+            "go-up": QStyle.StandardPixmap.SP_ArrowUp,
+            "view-refresh": QStyle.StandardPixmap.SP_BrowserReload,
+            "edit-find": QStyle.StandardPixmap.SP_FileDialogContentsView,
+            "document-save": QStyle.StandardPixmap.SP_DialogSaveButton,
+            "folder-new": QStyle.StandardPixmap.SP_FileDialogNewFolder,
+            "edit-delete": QStyle.StandardPixmap.SP_TrashIcon,
+            "edit-rename": QStyle.StandardPixmap.SP_FileDialogDetailedView,
+            "help-about": QStyle.StandardPixmap.SP_MessageBoxInformation,
+            "application-exit": QStyle.StandardPixmap.SP_DialogCloseButton,
+        }
+        
+        if name in icon_map:
+            return style.standardIcon(icon_map[name])
+        
+        return QIcon()
+    
     def _setup_statusbar(self):
         """设置状态栏"""
-        self.statusBar().showMessage("就绪")
+        status_bar = self.statusBar()
+        status_bar.showMessage("就绪")
+        
+        # 版本标签
+        version_label = QLabel("v1.1.0")
+        version_label.setStyleSheet("color: #757575; padding: 0 8px;")
+        status_bar.addPermanentWidget(version_label)
+        
+        # 分隔符
+        sep = QLabel("|")
+        sep.setStyleSheet("color: #E0E0E0; padding: 0 4px;")
+        status_bar.addPermanentWidget(sep)
         
         # 选择信息标签
         self.selection_label = QLabel("选择: 0 个对象")
-        self.statusBar().addPermanentWidget(self.selection_label)
+        self.selection_label.setStyleSheet("color: #757575; padding: 0 8px;")
+        status_bar.addPermanentWidget(self.selection_label)
     
     def _setup_central_widget(self):
         """设置中央部件"""
@@ -376,40 +433,131 @@ class MainWindow(QMainWindow):
         
         layout = QVBoxLayout(central_widget)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # 地址栏
-        address_layout = QHBoxLayout()
-        address_layout.setContentsMargins(5, 5, 5, 5)
+        # 地址栏容器
+        address_container = QWidget()
+        address_container.setStyleSheet("""
+            QWidget {
+                background-color: #FFFFFF;
+                border-bottom: 1px solid #E0E0E0;
+            }
+        """)
+        address_layout = QHBoxLayout(address_container)
+        address_layout.setContentsMargins(8, 8, 8, 8)
+        address_layout.setSpacing(8)
         
-        address_label = QLabel("路径:")
+        # 地址图标
+        address_icon = QLabel()
+        address_icon.setPixmap(self.style().standardIcon(
+            QStyle.StandardPixmap.SP_FileDialogStart
+        ).pixmap(16, 16))
+        address_layout.addWidget(address_icon)
+        
+        # 地址输入框
         self.address_edit = QLineEdit()
         self.address_edit.setPlaceholderText("选择文件或设备...")
+        self.address_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 8px 12px;
+                border: 2px solid #E0E0E0;
+                border-radius: 4px;
+                background-color: #FAFAFA;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border-color: #2196F3;
+                background-color: #FFFFFF;
+            }
+        """)
         self.address_edit.returnPressed.connect(self._navigate_to)
-        
-        go_button = QPushButton("转到")
-        go_button.clicked.connect(self._navigate_to)
-        
-        address_layout.addWidget(address_label)
         address_layout.addWidget(self.address_edit)
+        
+        # 转到按钮
+        go_button = QPushButton("转到")
+        go_button.setFixedWidth(60)
+        go_button.clicked.connect(self._navigate_to)
         address_layout.addWidget(go_button)
         
-        layout.addLayout(address_layout)
+        layout.addWidget(address_container)
         
         # 分割窗口：树视图 + 内容区域
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #E0E0E0;
+                width: 1px;
+            }
+            QSplitter::handle:hover {
+                background-color: #2196F3;
+            }
+        """)
+        
+        # 目录树容器
+        tree_container = QWidget()
+        tree_container.setStyleSheet("""
+            QWidget {
+                background-color: #FFFFFF;
+                border-right: 1px solid #E0E0E0;
+            }
+        """)
+        tree_layout = QVBoxLayout(tree_container)
+        tree_layout.setContentsMargins(0, 0, 0, 0)
+        tree_layout.setSpacing(0)
+        
+        # 目录树标题
+        tree_header = QLabel("目录结构")
+        tree_header.setStyleSheet("""
+            QLabel {
+                padding: 8px 12px;
+                font-weight: bold;
+                color: #757575;
+                background-color: #FAFAFA;
+                border-bottom: 1px solid #E0E0E0;
+            }
+        """)
+        tree_layout.addWidget(tree_header)
         
         # 目录树
         self.tree_widget = QTreeWidget()
-        self.tree_widget.setHeaderLabel("目录结构")
+        self.tree_widget.setHeaderHidden(True)
         self.tree_widget.setMinimumWidth(200)
+        self.tree_widget.setStyleSheet("""
+            QTreeWidget {
+                border: none;
+                padding: 4px;
+            }
+            QTreeWidget::item {
+                padding: 6px;
+                margin: 2px;
+                border-radius: 4px;
+            }
+            QTreeWidget::item:selected {
+                background-color: #E3F2FD;
+                color: #1976D2;
+            }
+            QTreeWidget::item:hover {
+                background-color: #F5F5F5;
+            }
+        """)
         self.tree_widget.itemClicked.connect(self._on_tree_item_clicked)
         self.tree_widget.itemExpanded.connect(self._on_tree_item_expanded)
+        tree_layout.addWidget(self.tree_widget)
+        
+        splitter.addWidget(tree_container)
+        
+        # 右侧内容区域
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
         
         # 视图管理器
         self.view_manager = ViewManager()
         self.view_manager.item_clicked.connect(self._on_view_item_clicked)
         self.view_manager.item_double_clicked.connect(self._on_view_item_double_clicked)
         self.view_manager.column_subitems_requested.connect(self._on_column_subitems_requested)
+        right_layout.addWidget(self.view_manager)
         
         # 文件表格（保留用于兼容）
         self.table_widget = QTableWidget()
@@ -433,15 +581,21 @@ class MainWindow(QMainWindow):
         self.info_panel = FilePropertiesPanel()
         self.info_panel.setMinimumWidth(250)
         self.info_panel.setMaximumWidth(350)
+        self.info_panel.setStyleSheet("""
+            QWidget {
+                background-color: #FFFFFF;
+                border-left: 1px solid #E0E0E0;
+            }
+        """)
         
         # 创建右侧分割窗口（视图管理器 + 信息面板）
         right_splitter = QSplitter(Qt.Orientation.Horizontal)
-        right_splitter.addWidget(self.view_manager)
+        right_splitter.addWidget(right_widget)
         right_splitter.addWidget(self.info_panel)
         right_splitter.setSizes([500, 250])
         
         # 主分割窗口（树 + 右侧）
-        splitter.addWidget(self.tree_widget)
+        splitter.addWidget(tree_container)
         splitter.addWidget(right_splitter)
         splitter.setSizes([200, 750])
         
